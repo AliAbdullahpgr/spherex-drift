@@ -246,11 +246,11 @@ export default function App() {
     else if (i !== aIdx && i !== bIdx) set(Math.abs(i - aIdx) <= Math.abs(i - bIdx) ? { a: i, b: bIdx } : { a: aIdx, b: i });
   };
   const hud = s.mode === "blink" && cur
-    ? { big: fmtDate(cur.ms), small: `${cur.survey === "wise" ? "WISE" : `SPHEREx pass ${cur.pass}`} · ${cur.wl.toFixed(2)} µm${cur.kind === "stack" ? ` · ${cur.n} exposures combined` : ""}`, tag: "Blink" }
+    ? { big: fmtDate(cur.ms), small: `${cur.survey === "wise" ? "WISE" : `SPHEREx pass ${cur.pass}`}, ${cur.wl.toFixed(2)} µm${cur.kind === "stack" ? `, ${cur.n} exposures combined` : ""}` }
     : s.mode === "rainbow" && n
-      ? { big: `${fmtDate(epochs[0].ms).slice(0, 4)} to ${fmtDate(epochs[n - 1].ms).slice(0, 4)}`, small: `${loadedIdx.length} dates in one picture`, tag: "Rainbow trail" }
+      ? { big: `${fmtDate(epochs[0].ms).slice(0, 4)} to ${fmtDate(epochs[n - 1].ms).slice(0, 4)}`, small: `${loadedIdx.length} dates in one picture` }
       : s.mode === "diff" && epochs[aIdx] && epochs[bIdx]
-        ? { big: `${fmtDate(epochs[bIdx].ms)} minus ${fmtDate(epochs[aIdx].ms)}`, small: "newer minus older", tag: "Difference" }
+        ? { big: `${fmtDate(epochs[bIdx].ms)} minus ${fmtDate(epochs[aIdx].ms)}`, small: "newer minus older" }
         : undefined;
   const showMarks = s.mark && expected && epochs.length > 0;
   const pmMarks = !showMarks ? [] : (s.mode === "blink" && cur ? [{ ...expected!.at(cur.ms), tone: "now" as const }]
@@ -270,8 +270,8 @@ export default function App() {
     <div className={`app ${s.embed ? "embed" : ""}`}>
       {!s.embed && (
         <header className="top">
-          <a className="wordmark" href="./" aria-label="SPHEREx Drift, start over">SPHEREx <i>Drift</i></a>
-          <span className="topnote">Real NASA SPHEREx images · WISE back to 2010</span>
+          <a className="wordmark" href="./" aria-label="SPHEREx Drift, start over">SPHEREx Drift</a>
+          <span className="topnote">Real NASA SPHEREx images, with WISE images back to 2010</span>
         </header>
       )}
       {backend?.mock && (
@@ -284,54 +284,52 @@ export default function App() {
       <div className="shell">
         {/* ---------------- left: where to look ---------------- */}
         <nav className="rail left" aria-label="Where to look">
+          <section className="about" data-testid="about-target">
+            <h1 className="title">{target ? target.name : "Custom position"}</h1>
+            {target
+              ? <p className="lede">{target.kind === "variable" ? "A star whose brightness changes." : target.kind === "mover" ? "A nearby object that moves across the sky." : ""}{expected ? <> It moves <b>{expected.rate.toFixed(1)}″ per year</b>, heading {expected.dir}.</> : null}</p>
+              : <p className="lede coords">{fmtRA(s.ra)} {fmtDec(s.dec)}</p>}
+            {expected && (
+              <>
+                <p className="note">The yellow ring marks where that motion puts it on each date.</p>
+                <label className="check"><input type="checkbox" checked={s.mark} onChange={(e) => set({ mark: e.target.checked })} data-testid="mark-toggle" /> Show expected position</label>
+              </>
+            )}
+            {target?.kind === "variable" && <p className="note">It stays in place. Watch it brighten and fade in Blink, or click it to compare its spectrum between passes.</p>}
+          </section>
+
           <form onSubmit={(e) => { e.preventDefault(); go(input); }} className="coordform">
-            <label htmlFor="coords" className="lab">Go to any position</label>
+            <h2 className="h"><label htmlFor="coords">Go to a position</label></h2>
             <div className="searchrow">
               <input id="coords" data-testid="coord-input" value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
-                placeholder="RA Dec or a target name" />
-              <button className="go" type="submit" data-testid="coord-go" aria-label="Go">→</button>
+                placeholder="RA and Dec, or a target name" />
+              <button className="go" type="submit" data-testid="coord-go">Go</button>
             </div>
             <div className={`msg ${inputMsg?.kind ?? ""}`} data-testid="coord-msg" role="status">{inputMsg?.text ?? `Now showing ${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
-            <p className="hint">Decimal degrees or 08h55m10.8s -07d14m42s both work.</p>
+            <p className="hint">Use decimal degrees, or a form like 08h55m10.8s -07d14m42s.</p>
           </form>
 
-          <div className="lab">Test targets</div>
-          <ol className="cat" data-testid="targets">
-            {targets.map((t, i) => (
-              <li key={t.id}>
-                <button className={`catrow ${target?.id === t.id ? "on" : ""}`} onClick={() => { setInput(t.name); go(t.name); }} data-testid={`target-${t.id}`} title={t.note}>
-                  <span className="num">{String(i + 1).padStart(2, "0")}</span>
-                  <span className="nm">{t.name}</span>
-                  <span className={`tag ${t.kind ?? ""}`}>{t.kind === "variable" ? "changes" : t.kind === "mover" ? "moves" : ""}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-
-          {target && (
-            <section className="about" data-testid="about-target">
-              <div className="lab">{target.kind === "variable" ? "Variable star" : target.kind === "mover" ? "Known mover" : "Target"}</div>
-              <h2 className="display">{target.name}</h2>
-              {target.note && <p className="dim">{target.note.charAt(0).toUpperCase() + target.note.slice(1)}.</p>}
-              {expected && (
-                <>
-                  <div className="stat"><b>{expected.rate.toFixed(1)}″</b><span>per year, heading {expected.dir}</span></div>
-                  <p>The yellow ring shows where its catalogued motion puts it on each date.</p>
-                  <label className="check"><input type="checkbox" checked={s.mark} onChange={(e) => set({ mark: e.target.checked })} data-testid="mark-toggle" /> Show expected position</label>
-                </>
-              )}
-              {target.kind === "variable" && <p>It does not move. Watch its brightness change between dates in Blink, or click it to compare its spectrum pass by pass.</p>}
-            </section>
-          )}
+          <section>
+            <h2 className="h">Test targets</h2>
+            <ul className="cat" data-testid="targets">
+              {targets.map((t) => (
+                <li key={t.id}>
+                  <button className={`catrow ${target?.id === t.id ? "on" : ""}`} aria-current={target?.id === t.id ? "true" : undefined} onClick={() => { setInput(t.name); go(t.name); }} data-testid={`target-${t.id}`} title={t.note}>
+                    <span className="nm">{t.name}</span>
+                    <span className="tag">{t.kind === "variable" ? "changes" : t.kind === "mover" ? "moves" : ""}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
           <Walkthrough onApply={applyWalk} />
         </nav>
 
         {/* ---------------- centre: the picture ---------------- */}
         <main className="stage">
           <div className="tabs" role="tablist">
-            {(["blink", "rainbow", "diff"] as Mode[]).map((m, i) => (
+            {(["blink", "rainbow", "diff"] as Mode[]).map((m) => (
               <button key={m} role="tab" aria-selected={s.mode === m} className={`tab ${s.mode === m ? "on" : ""}`} onClick={() => { set({ mode: m }); if (m !== "blink") setPlaying(false); }} data-testid={`mode-${m}`}>
-                <span className="num">{String(i + 1).padStart(2, "0")}</span>
                 <span className="tl">{modeName[m]}</span>
                 <span className="sub">{modeSub[m]}</span>
               </button>
@@ -347,17 +345,19 @@ export default function App() {
           />
           <div className="under">
             <Readout hover={hover} value={hoverVal} />
-            <span className="caption" data-testid="caption">{caption}{s.mode === "blink" && cur ? ` · ${cur.wl.toFixed(2)} µm` : ""}</span>
+            <span className="caption" data-testid="caption">{caption}{s.mode === "blink" && cur ? `, ${cur.wl.toFixed(2)} µm` : ""}</span>
           </div>
 
           <p className="explain">{modeHelp[s.mode]}</p>
 
           {s.mode === "blink" && (
             <div className="transport" data-testid="transport">
-              <button className="btn sq" onClick={() => set({ frame: (frameIdx - 1 + n) % n })} aria-label="Previous epoch" disabled={n < 2}>←</button>
-              <button className="btn solid play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"} data-testid="play" disabled={loadedIdx.length < 2}>{playing ? "❚❚ Pause" : "▶ Play"}</button>
-              <button className="btn sq" onClick={() => set({ frame: (frameIdx + 1) % n })} aria-label="Next epoch" disabled={n < 2}>→</button>
-              <span className="count">{n ? `${String(frameIdx + 1).padStart(2, "0")} / ${String(n).padStart(2, "0")}` : ""}</span>
+              <button className="btn sq" onClick={() => set({ frame: (frameIdx - 1 + n) % n })} aria-label="Previous date" disabled={n < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M10 3 5 8l5 5" /></svg></button>
+              <button className="btn solid play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"} data-testid="play" disabled={loadedIdx.length < 2}>{playing
+                  ? <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4 3h3v10H4zM9 3h3v10H9z" /></svg><span>Pause</span></>
+                  : <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4.5 2.5v11l9-5.5z" /></svg><span>Play</span></>}</button>
+              <button className="btn sq" onClick={() => set({ frame: (frameIdx + 1) % n })} aria-label="Next date" disabled={n < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M6 3l5 5-5 5" /></svg></button>
+              <span className="count">{n ? `${frameIdx + 1} of ${n}` : ""}</span>
               <label className="inline">Speed
                 <input type="range" min="0.25" max="6" step="0.25" value={s.speed} onChange={(e) => set({ speed: +e.target.value })} aria-label="Playback speed" />
                 <span className="mono">{s.speed}/s</span>
@@ -370,19 +370,19 @@ export default function App() {
           {s.mode === "diff" && (
             <div className="diffctl" data-testid="diffctl">
               <div className="diffpick">
-                <label>A · older picture (subtracted)
+                <label>Older picture (A, subtracted)
                   <select value={aIdx} onChange={(e) => set({ a: +e.target.value })} data-testid="diff-a">{epochs.map((e, i) => <option key={e.key} value={i}>{e.label} · {fmtDate(e.ms)} · {e.wl.toFixed(2)} µm</option>)}</select></label>
-                <label>B · newer picture
+                <label>Newer picture (B)
                   <select value={bIdx} onChange={(e) => set({ b: +e.target.value })} data-testid="diff-b">{epochs.map((e, i) => <option key={e.key} value={i}>{e.label} · {fmtDate(e.ms)} · {e.wl.toFixed(2)} µm</option>)}</select></label>
               </div>
               {epochs.length < 2 && <div className="alert">Need at least two epochs to subtract.</div>}
               {aIdx === bIdx && epochs.length >= 2 && <div className="alert">Pick two different epochs: subtracting an epoch from itself is blank.</div>}
               {dMismatch && <div className="alert warn" data-testid="diff-warning">⚠ {dMismatch}</div>}
-              <p className="keyline"><span className="sw blue" /> it was here <span className="sw orange" /> it is here now</p>
+              <p className="keyline"><span className="sw blue" /> It was here <span className="sw orange" /> It is here now</p>
             </div>
           )}
           {s.mode === "rainbow" && (
-            <p className="keyline" data-testid="rainbow-help"><span className="ramp" /> oldest to newest · white means it did not move or change</p>
+            <p className="keyline" data-testid="rainbow-help"><span className="ramp" /> Oldest to newest. White means it did not move or change.</p>
           )}
 
           <Filmstrip epochs={epochs} thumbs={thumbs} marks={marks} onSelect={selectEpoch} />
@@ -395,12 +395,12 @@ export default function App() {
         {/* ---------------- right: instrument settings ---------------- */}
         <aside className="rail right">
           <section>
-            <div className="lab">View</div>
+            <h2 className="h">View</h2>
             <label className="field">Field of view <span className="val">{s.fov}′</span>
               <input type="range" min="1" max="30" step="0.5" value={s.fov} onChange={(e) => { cache.current.clear(); set({ fov: +e.target.value }); }} aria-label="Field of view" data-testid="fov" /></label>
-            <label className="field">Wavelength (detector)
+            <label className="field">Wavelength
               <select value={det} onChange={(e) => set({ det: +e.target.value, frame: 0, a: null, b: null })} data-testid="detector">
-                {(detInfo.length ? detInfo : [1, 2, 3, 4, 5, 6].map((d) => ({ detector: d, wl: 0, passes: [] as number[], nFrames: 0 }))).map((d) => <option key={d.detector} value={d.detector}>{d.wl ? `${d.wl.toFixed(1)} µm · ` : ""}detector {d.detector}{d.passes.length ? ` · ${d.passes.length} passes` : ""}</option>)}
+                {(detInfo.length ? detInfo : [1, 2, 3, 4, 5, 6].map((d) => ({ detector: d, wl: 0, passes: [] as number[], nFrames: 0 }))).map((d) => <option key={d.detector} value={d.detector}>{d.wl ? `${d.wl.toFixed(1)} µm, ` : ""}detector {d.detector}{d.passes.length ? `, ${d.passes.length} passes` : ""}</option>)}
               </select></label>
             <label className="field">Images
               <select value={s.src} onChange={(e) => set({ src: e.target.value as "stack" | "frame", frame: 0, a: null, b: null })} data-testid="src">
@@ -424,7 +424,7 @@ export default function App() {
           </section>
 
           <section>
-            <div className="lab">Data that exists here</div>
+            <h2 className="h">Data available here</h2>
             <p className="dim small">Columns are SPHEREx passes over this spot, rows are wavelengths. Numbers count exposures. Click a cell to view it, or drag across passes to limit the dates.</p>
             <Pad
               frames={spx} detector={det} passFrom={passFrom} passTo={passTo} currentPass={cur?.survey === "spherex" ? cur.pass : null}
@@ -437,7 +437,7 @@ export default function App() {
           </section>
 
           <section data-testid="spectrum-panel">
-            <div className="lab">Spectrum</div>
+            <h2 className="h">Spectrum</h2>
             {spec.state === "idle" && <p className="dim">Click any star in the picture to plot its brightness at every wavelength SPHEREx measured, coloured by pass.</p>}
             {spec.state === "loading" && <p className="dim" role="status"><i className="spin" /> Measuring the spectrum there. Near the centre this takes a few seconds; far from it, up to a minute.</p>}
             {spec.state === "error" && <p className="alert">Spectrum failed: {spec.err}</p>}
@@ -448,8 +448,8 @@ export default function App() {
 
       {!s.embed && (
         <footer className="foot">
-          <span>Data: NASA/IPAC IRSA (SPHEREx) · unWISE / WiseView (WISE, NEOWISE). North is up, east is left.</span>
-          <span>The address bar holds the current view: copy it to share, add <span className="mono">&embed=1</span> to embed. Space plays, arrow keys step.</span>
+          <span>Data from NASA/IPAC IRSA (SPHEREx) and unWISE via WiseView (WISE, NEOWISE). North is up, east is left.</span>
+          <span>Copy the address bar to share this view. Space plays, arrow keys step.</span>
         </footer>
       )}
     </div>

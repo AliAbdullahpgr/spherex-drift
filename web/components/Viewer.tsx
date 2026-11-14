@@ -94,8 +94,8 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
 
 export function Readout({ hover, value }: { hover: { ra: number; dec: number; x: number; y: number } | null; value?: string }) {
   return (
-    <div className="readout mono" data-testid="readout" aria-live="off">
-      {hover ? <>RA {fmtRA(hover.ra)} · Dec {fmtDec(hover.dec)} · {hover.ra.toFixed(5)}, {hover.dec.toFixed(5)}{value ? ` · ${value}` : ""}</> : "Hover for RA/Dec, click a pixel for its spectrum"}
+    <div className={`readout ${hover ? "mono" : ""}`} data-testid="readout" aria-live="off">
+      {hover ? <>RA {fmtRA(hover.ra)} · Dec {fmtDec(hover.dec)} · {hover.ra.toFixed(5)}, {hover.dec.toFixed(5)}{value ? ` · ${value}` : ""}</> : "Point at the picture for coordinates. Click a star for its spectrum."}
     </div>
   );
 }

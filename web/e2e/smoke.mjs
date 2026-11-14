@@ -61,7 +61,7 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
 
   // blink: step changes the caption; play toggles
   const cap0 = await page.textContent('[data-testid=caption]');
-  await page.click('[aria-label="Next epoch"]');
+  await page.click('[aria-label="Next date"]');
   const cap1 = await page.textContent('[data-testid=caption]');
   ok(cap0 !== cap1, `${name}: stepping changes the shown epoch ("${cap0.slice(0, 30)}" -> "${cap1.slice(0, 30)}")`);
   await page.click('[data-testid=play]');

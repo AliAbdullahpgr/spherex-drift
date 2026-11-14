@@ -4,7 +4,7 @@ import "./globals.css";
 
 const sans = Geist({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono", display: "swap" });
-const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal", "italic"], variable: "--font-serif", display: "swap" });
+const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["normal"], variable: "--font-serif", display: "swap" });
 
 export const metadata: Metadata = {
   title: "SPHEREx Drift: spot what moves in the sky",
