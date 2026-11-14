@@ -44,7 +44,7 @@ CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 # to 2026.0 with Gaia proper motions. WISE 0855: coordinates from CHALLENGE.md.
 # pm_mas_yr = [pm_ra*cos(dec), pm_dec] in mas/yr and epoch = the year the ra/dec above refer to; the
 # frontend uses them to mark where a known mover should be in each image. Sources: Barnard's Star
-# Gaia DR3; eps Indi Ba/Bb barycentre (Dieterich et al. 2018, approximate); WISE 0855 Luhman & Esplin
+# Gaia DR3; eps Indi B from SIMBAD (pm 3981.98, -2466.83 mas/yr); WISE 0855 Luhman & Esplin
 # 2016. The WISE 0855 ra/dec are the challenge's coordinates, which match its position in the first
 # WISE epoch (2010.4) - by 2026 it sits ~2 arcmin west of them.
 TARGETS = [
@@ -52,7 +52,7 @@ TARGETS = [
      "pm_mas_yr": [-801.6, 10362.4], "epoch": 2026.0,
      "note": "nearest single star; proper motion 10.4 arcsec/yr (position for epoch 2026.0)"},
     {"id": "epsindib", "name": "Epsilon Indi B", "ra": 331.096653, "dec": -56.800663, "kind": "mover",
-     "pm_mas_yr": [3987.4, -2505.4], "epoch": 2026.0,
+     "pm_mas_yr": [3982.0, -2466.8], "epoch": 2026.0,
      "note": "brown dwarf pair orbiting eps Indi A, ~6.7 arcmin from the bright star (epoch 2026.0)"},
     {"id": "wise0855", "name": "WISE 0855", "ra": 133.795129, "dec": -7.245147, "kind": "mover",
      "pm_mas_yr": [-8118.0, 680.0], "epoch": 2010.4,

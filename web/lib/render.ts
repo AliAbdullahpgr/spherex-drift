@@ -80,6 +80,26 @@ export function levels(n: Norm, bp: number, wp: number, minLo = -Infinity): Leve
   return { lo, hi };
 }
 
+/**
+ * One display range shared by every date from the same survey, in real brightness units, so a star
+ * that got brighter looks brighter. (Scaling each date on its own would hide exactly that.)
+ * Returns per-image levels in each image's own noise units, or null where the image is not loaded.
+ */
+export function sharedLevels(norms: (Norm | null)[], groups: string[], bp: number, wp: number): (Levels | null)[] {
+  const out: (Levels | null)[] = norms.map(() => null);
+  const med = (a: number[]) => { const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+  for (const g of new Set(groups)) {
+    const idx = norms.map((n, i) => (n && groups[i] === g ? i : -1)).filter((i) => i >= 0);
+    if (!idx.length) continue;
+    const sig = idx.map((i) => norms[i]!.sigma ?? 1);
+    const samples = idx.map((i) => finiteSample(norms[i]!.data));
+    const lo = med(samples.map((s, k) => pct(s, bp) * sig[k]));
+    const hi = Math.max(Math.max(...samples.map((s, k) => pct(s, wp) * sig[k])), lo + MIN_SPAN * med(sig));
+    idx.forEach((i, k) => { out[i] = { lo: lo / sig[k], hi: hi / sig[k] }; });
+  }
+  return out;
+}
+
 export function stretchFn(kind: Stretch): (t: number) => number {
   if (kind === "linear") return (t) => t;
   if (kind === "log") return (t) => Math.log10(1 + 999 * t) / 3;

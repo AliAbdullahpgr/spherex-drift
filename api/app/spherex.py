@@ -405,6 +405,27 @@ def aperture_point(meta, img, flags, radius_arcsec, xy=None):
             "aperture_pix": area, "saturated": saturated}
 
 
+def halo_point(meta, img, flags, xy=None):
+    """Brightness of a star's outer halo, for stars whose core is saturated.
+
+    A saturated core cannot be measured, but the light the telescope spreads into a ring a few
+    pixels out scales with the star's true brightness. Returns the median surface brightness in a
+    ring 4-7 native pixels from the star minus the median in a ring 10-13 pixels out (MJy/sr), or
+    None when too few clean pixels are available.
+    """
+    ny, nx = img.shape
+    cx, cy = xy if xy is not None else (meta["px"] - meta["x0"], meta["py"] - meta["y0"])
+    sat = (flags & SAT_BITS) != 0
+    bad = ~np.isfinite(img) | sat | ((flags & HARD_BITS) != 0)
+    yy, xx = np.mgrid[0:ny, 0:nx]
+    d = np.hypot(xx - cx, yy - cy)
+    ring = (d >= 4.0) & (d < 7.0) & ~bad
+    sky = (d >= 10.0) & (d < 13.0) & ~bad
+    if ring.sum() < 25 or sky.sum() < 40:
+        return None
+    return float(np.median(img[ring]) - np.median(img[sky]))
+
+
 def spectrum(ra, dec, radius_arcsec, cra=None, cdec=None):
     """One photometry point per exposure.
 
@@ -437,11 +458,14 @@ def spectrum(ra, dec, radius_arcsec, cra=None, cdec=None):
             if not (0 <= xy[0] < img.shape[1] and 0 <= xy[1] < img.shape[0]):
                 return None
         p = aperture_point(meta, img, flags, radius_arcsec, xy)
-        if p is None:
+        halo = halo_point(meta, img, flags, xy)
+        if p is None and halo is None:
             return None
-        return {"wavelength_um": round(meta["wavelength_um"], 5), "flux_mjy_sr": p["flux_mjy_sr"],
-                "err": p["err"], "flux_mjy": p["flux_mjy"], "time": _iso(r["mjd"]), "pass": r["pass"],
-                "detector": r["detector"], "flags": meta["flags"], "saturated": p["saturated"]}
+        return {"wavelength_um": round(meta["wavelength_um"], 5),
+                "flux_mjy_sr": p["flux_mjy_sr"] if p else None, "err": p["err"] if p else None,
+                "flux_mjy": p["flux_mjy"] if p else None, "halo_mjy_sr": halo,
+                "time": _iso(r["mjd"]), "pass": r["pass"], "detector": r["detector"],
+                "flags": meta["flags"], "saturated": p["saturated"] if p else True}
 
     pts = [p for p in pmap(one, list(zip(recs, info))) if p]
     pts.sort(key=lambda p: p["wavelength_um"])

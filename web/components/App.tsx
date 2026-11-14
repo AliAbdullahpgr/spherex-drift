@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "@/lib/api";
 import { fmtDec, fmtRA, resolveInput } from "@/lib/coords";
 import { buildEpochs, defaultDetector, detectorInfo, fmtDate, flagHelp, type Epoch } from "@/lib/epochs";
-import { difference, levels, normalise, rainbow, toGray, type Norm } from "@/lib/render";
+import { difference, levels, normalise, rainbow, sharedLevels, toGray, type Norm } from "@/lib/render";
+import { lightCurve, pickMeasure } from "@/lib/photometry";
+import { centroid, fitMotion, msToYear, type Sample } from "@/lib/motion";
+import { apparentMotion, injectPlanetX } from "@/lib/planetx";
 import { DEFAULTS, readState, writeState, type AppState, type Mode } from "@/lib/urlstate";
 import type { Frame, SpectrumPoint, Target } from "@/lib/types";
 import Viewer, { Readout } from "./Viewer";
@@ -12,6 +15,7 @@ import Pad from "./Pad";
 import Spectrum from "./Spectrum";
 import Walkthrough from "./Walkthrough";
 import Filmstrip from "./Filmstrip";
+import LightCurve from "./LightCurve";
 
 const SIZE = api.IMG_SIZE;
 type Hover = { x: number; y: number; ra: number; dec: number } | null;
@@ -36,11 +40,21 @@ export default function App() {
   const [picked, setPicked] = useState<{ x: number; y: number; ra: number; dec: number } | null>(null);
   const [spec, setSpec] = useState<{ state: "idle" | "loading" | "done" | "error"; points: SpectrumPoint[]; err?: string }>({ state: "idle", points: [] });
 
+  const [listing, setListing] = useState<"quick" | "full" | "done">("done"); // how complete the exposure list is
+  const [autoDet, setAutoDet] = useState<number | null>(null);
+  const [centre, setCentre] = useState<{ state: "idle" | "loading" | "done" | "error"; points: SpectrumPoint[] }>({ state: "idle", points: [] });
+  const [px, setPx] = useState<{ on: boolean; dist: number; snr: number; seed: number; reveal: boolean }>({ on: false, dist: 5000, snr: 12, seed: 1, reveal: false });
+  const [resolving, setResolving] = useState(false);
+  const nowPos = useRef<{ ra: number; dec: number } | null>(null);
+
   const set = useCallback((p: Partial<AppState>) => setS((o) => ({ ...o, ...p })), []);
 
   // ---- init from URL
   useEffect(() => {
     const st = readState(window.location.search);
+    const q = new URLSearchParams(window.location.search);
+    // A bare link opens on the clearest view we have: WISE 0855 as a 16-year rainbow trail.
+    if (!q.has("ra") && !q.has("mode")) { st.mode = "rainbow"; st.wise = true; }
     setS(st);
     setInput(`${st.ra.toFixed(5)} ${st.dec.toFixed(5)}`);
     api.detectBackend(st.mock).then((b) => {
@@ -64,18 +78,34 @@ export default function App() {
     if (!ready) return;
     const ctl = new AbortController();
     setFramesState("loading"); setFramesErr(""); setWiseNote(""); setPicked(null); setSpec({ state: "idle", points: [] });
+    setCentre({ state: "idle", points: [] }); setAutoDet(null); setListing("quick");
+    setSpx([]); setWise([]); // never show or request the previous position's exposures against the new one
+    api.getWiseFrames(view, ctl.signal).then((w) => {
+      if (ctl.signal.aborted) return;
+      setWise(w.frames); if (!w.frames.length) setWiseNote("No WISE images cover this patch.");
+    }).catch((e) => { if (!ctl.signal.aborted) { setWise([]); setWiseNote("WISE images could not be loaded: " + (e?.message ?? "unknown error")); } });
     (async () => {
       try {
-        const [a, w] = await Promise.allSettled([api.getFrames(view, ctl.signal), api.getWiseFrames(view, ctl.signal)]);
+        // 1. quick list: enough to start showing pictures within seconds
+        const quick = await api.getFrames(view, ctl.signal, true);
         if (ctl.signal.aborted) return;
-        if (a.status === "rejected") throw a.reason;
-        setSpx(a.value.frames);
-        if (w.status === "fulfilled") { setWise(w.value.frames); if (!w.value.frames.length) setWiseNote("No WISE coverage returned for this patch."); }
-        else { setWise([]); setWiseNote("WISE epochs could not be loaded: " + (w.reason?.message ?? "unknown error")); }
-        setFramesState("done");
+        setSpx(quick.frames); setAutoDet(quick.frames.length ? defaultDetector(quick.frames) : null);
+        setFramesState("done"); setListing(quick.frames.length ? "full" : "done");
+        if (!quick.frames.length) return;
+        // 2. full list in the background: exact wavelengths and quality flags
+        const full = await api.getFrames(view, ctl.signal, false);
+        if (ctl.signal.aborted) return;
+        setSpx(full.frames); setListing("done");
+        // 3. brightness of whatever sits at the centre, for the light curve and spectrum
+        setCentre({ state: "loading", points: [] });
+        try {
+          const at = nowPos.current ?? { ra: view.ra, dec: view.dec };
+          const r = await api.getSpectrum(at.ra, at.dec, view, 6, ctl.signal);
+          if (!ctl.signal.aborted) setCentre({ state: "done", points: r.points });
+        } catch { if (!ctl.signal.aborted) setCentre({ state: "error", points: [] }); }
       } catch (e: any) {
         if (ctl.signal.aborted) return;
-        setFramesErr(e?.message ?? String(e)); setFramesState("error");
+        setFramesErr(e?.message ?? String(e)); setFramesState("error"); setListing("done");
       }
     })();
     return () => ctl.abort();
@@ -83,7 +113,7 @@ export default function App() {
   }, [ready, viewKey]);
 
   const detInfo = useMemo(() => detectorInfo(spx), [spx]);
-  const det = s.det ?? defaultDetector(spx);
+  const det = s.det ?? autoDet ?? defaultDetector(spx);
   const allPasses = useMemo(() => [...new Set(spx.map((f) => f.pass))].sort((a, b) => a - b), [spx]);
   const passFrom = Math.max(s.pf ?? allPasses[0] ?? 1, allPasses[0] ?? 1);
   const passTo = Math.min(s.pt ?? allPasses[allPasses.length - 1] ?? 1, allPasses[allPasses.length - 1] ?? 1);
@@ -123,7 +153,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, framesState, epochs, viewKey]);
 
-  const norms = useMemo(() => epochs.map((e) => cache.current.get(imgKey(e)) ?? null), [epochs, ver, viewKey]); // eslint-disable-line
+  const rawNorms = useMemo(() => epochs.map((e) => cache.current.get(imgKey(e)) ?? null), [epochs, ver, viewKey]); // eslint-disable-line
+  const planet = useMemo(() => (px.on && epochs.length ? injectPlanetX(rawNorms, epochs.map((e) => e.ms), { distAU: px.dist, snr: px.snr, seed: px.seed, fovArcmin: s.fov }) : null), [px.on, px.dist, px.snr, px.seed, rawNorms, epochs, s.fov]);
+  const norms = planet ? planet.norms : rawNorms;
+  // blink uses one brightness scale per survey so real changes in brightness stay visible
+  const shared = useMemo(() => sharedLevels(norms, epochs.map((e) => e.survey), s.bp, s.wp), [norms, epochs, s.bp, s.wp]);
   const loadedIdx = norms.map((n, i) => (n ? i : -1)).filter((i) => i >= 0);
 
   // ---- play loop (skips epochs that are not loaded yet)
@@ -157,7 +191,7 @@ export default function App() {
     if (!epochs.length) return null;
     if (s.mode === "blink") {
       const nm = norms[frameIdx];
-      return nm ? toGray(nm, levels(nm, s.bp, s.wp), s.stretch) : null;
+      return nm ? toGray(nm, shared[frameIdx] ?? levels(nm, s.bp, s.wp), s.stretch) : null;
     }
     if (s.mode === "rainbow") {
       const list = norms.map((nm) => (nm ? { n: nm, lv: levels(nm, s.bp, s.wp, 2.5) } : null)).filter(Boolean) as { n: Norm; lv: ReturnType<typeof levels> }[];
@@ -165,10 +199,10 @@ export default function App() {
     }
     const A = norms[aIdx], B = norms[bIdx];
     return A && B && aIdx !== bIdx ? difference(A, B, 1) : null;
-  }, [norms, s.mode, s.bp, s.wp, s.stretch, frameIdx, aIdx, bIdx, epochs.length]);
+  }, [norms, shared, s.mode, s.bp, s.wp, s.stretch, frameIdx, aIdx, bIdx, epochs.length]);
 
   const busy = useMemo(() => {
-    if (framesState === "loading") return "Finding which exposures cover this patch of sky…";
+    if (framesState === "loading") return "Asking the archive which exposures cover this patch of sky. This takes a few seconds.";
     if (framesState === "error") return null;
     if (!epochs.length) return null;
     if (s.mode === "blink" && !norms[frameIdx]) return `Fetching ${describe(epochs[frameIdx])} from the archive. This can take several seconds per image.`;
@@ -190,7 +224,29 @@ export default function App() {
     };
     return { at, rate: Math.hypot(pmRa, pmDec) / 1000, dir: compassDir(pmRa, pmDec) };
   }, [target, s.fov]);
+  // sky position of a known mover in mid-2026, when SPHEREx saw it (used for its automatic spectrum)
+  nowPos.current = target?.pm_mas_yr && target.epoch != null
+    ? { ra: target.ra + ((target.pm_mas_yr[0] * (2026.0 - target.epoch)) / 3.6e6) / Math.cos((target.dec * Math.PI) / 180), dec: target.dec + (target.pm_mas_yr[1] * (2026.0 - target.epoch)) / 3.6e6 }
+    : null;
   const inView = (q: { x: number; y: number }) => q.x > 0.01 && q.x < 0.99 && q.y > 0.01 && q.y < 0.99;
+
+  // ---- measure the motion in the pictures themselves and compare with the catalogue
+  const measured = useMemo(() => {
+    if (!expected) return null;
+    const fov = s.fov * 60;
+    const samples: Sample[] = [];
+    rawNorms.forEach((nm, i) => {
+      if (!nm) return;
+      const e = expected.at(epochs[i].ms);
+      const c = centroid(nm, e.x * nm.w - 0.5, e.y * nm.h - 0.5, 14 / (fov / nm.w));
+      if (c) samples.push({ yr: msToYear(epochs[i].ms), east: (0.5 - (c.x + 0.5) / nm.w) * fov, north: (0.5 - (c.y + 0.5) / nm.h) * fov });
+    });
+    const fit = fitMotion(samples);
+    return fit ? { ...fit, dir: compassDir(fit.pmEast, fit.pmNorth) } : null;
+  }, [expected, rawNorms, epochs, s.fov]);
+  const centrePicked = useMemo(() => (centre.state === "done" ? pickMeasure(centre.points) : null), [centre]);
+  const curves = useMemo(() => (centrePicked ? lightCurve(centrePicked) : []), [centrePicked]);
+  const clickedPicked = useMemo(() => (spec.state === "done" ? pickMeasure(spec.points) : null), [spec]);
 
   // ---- keyboard: space plays, arrows step
   useEffect(() => {
@@ -207,13 +263,31 @@ export default function App() {
   }, [s.mode, epochs.length]);
 
   // ---- actions
-  const go = (text: string) => {
-    const r = resolveInput(text, targets);
-    if (!r.ok) { setInputMsg({ kind: "err", text: r.error }); return; }
-    setInputMsg({ kind: "ok", text: r.label ? `${r.label}: ${r.ra.toFixed(5)}, ${r.dec.toFixed(5)}` : `${fmtRA(r.ra)}  ${fmtDec(r.dec)}` });
-    setInput(`${r.ra.toFixed(5)} ${r.dec.toFixed(5)}`);
+  const jump = (ra: number, dec: number, label: string | undefined, extra: Partial<AppState> = {}) => {
+    setInputMsg({ kind: "ok", text: label ? `${label}: ${ra.toFixed(5)}, ${dec.toFixed(5)}` : `${fmtRA(ra)}  ${fmtDec(dec)}` });
+    setInput(`${ra.toFixed(5)} ${dec.toFixed(5)}`);
     cache.current.clear();
-    set({ ra: r.ra, dec: r.dec, frame: 0, a: null, b: null, pf: null, pt: null });
+    setPx((p) => ({ ...p, on: false, reveal: false }));
+    set({ ra, dec, frame: 0, a: null, b: null, pf: null, pt: null, det: null, ...extra });
+  };
+  const go = async (text: string) => {
+    const r = resolveInput(text, targets);
+    if (r.ok) {
+      const t = targets.find((x) => x.name === r.label);
+      // movers need the long WISE baseline to show motion; variables are clearest as a blink
+      jump(r.ra, r.dec, r.label, t?.kind === "mover" ? { wise: true } : t?.kind === "variable" ? { wise: false, mode: "blink" } : {});
+      return;
+    }
+    const name = text.trim();
+    if (!name || !/[a-z]/i.test(name) || /^[\d\s.+\-:hmsd°'"]+$/i.test(name)) { setInputMsg({ kind: "err", text: r.error }); return; }
+    // not coordinates and not a test target: ask the name service (any star, galaxy or nebula)
+    setResolving(true); setInputMsg({ kind: "ok", text: `Looking up "${name}"…` });
+    try {
+      const hit = await api.resolveName(name);
+      if (hit) jump(hit.ra, hit.dec, hit.name);
+      else setInputMsg({ kind: "err", text: `No object called "${name}" was found. Check the spelling, or enter RA and Dec.` });
+    } catch (e: any) { setInputMsg({ kind: "err", text: e?.message ?? "Name lookup failed. Enter RA and Dec instead." }); }
+    finally { setResolving(false); }
   };
   const applyWalk = (p: Partial<AppState>) => { cache.current.clear(); set({ ...p, frame: 0, a: null, b: null, pf: null, pt: null, det: null }); setInput(`${(p.ra ?? s.ra).toFixed(5)} ${(p.dec ?? s.dec).toFixed(5)}`); setInputMsg(null); };
   const pick = async (p: { x: number; y: number; ra: number; dec: number }) => {
@@ -231,15 +305,16 @@ export default function App() {
   const caption = s.mode === "blink" && cur ? `${cur.label} ${fmtDate(cur.ms)}` : s.mode === "rainbow" ? `Rainbow trail of ${loadedIdx.length} epochs` : `Difference ${epochs[bIdx]?.label ?? ""} minus ${epochs[aIdx]?.label ?? ""}`;
   const noCoverage = framesState === "done" && !spx.length;
   const thumbCache = useRef(new WeakMap<Norm, { key: string; img: ImageData }>());
-  const thumbs = useMemo(() => norms.map((nm) => {
+  const thumbs = useMemo(() => norms.map((nm, i) => {
     if (!nm) return null;
-    const key = `${s.bp}|${s.wp}|${s.stretch}`;
+    const lv = shared[i] ?? levels(nm, s.bp, s.wp);
+    const key = `${lv.lo.toFixed(3)}|${lv.hi.toFixed(3)}|${s.stretch}`;
     const hit = thumbCache.current.get(nm);
     if (hit && hit.key === key) return hit.img;
-    const img = toGray(nm, levels(nm, s.bp, s.wp), s.stretch);
+    const img = toGray(nm, lv, s.stretch);
     thumbCache.current.set(nm, { key, img });
     return img;
-  }), [norms, s.bp, s.wp, s.stretch]);
+  }), [norms, shared, s.bp, s.wp, s.stretch]);
   const selectEpoch = (i: number) => {
     if (s.mode === "blink") set({ frame: i });
     else if (s.mode === "rainbow") set({ mode: "blink", frame: i });
@@ -256,7 +331,13 @@ export default function App() {
   const pmMarks = !showMarks ? [] : (s.mode === "blink" && cur ? [{ ...expected!.at(cur.ms), tone: "now" as const }]
     : s.mode === "diff" && epochs[aIdx] && epochs[bIdx] ? [{ ...expected!.at(epochs[aIdx].ms), label: "A", tone: "a" as const }, { ...expected!.at(epochs[bIdx].ms), label: "B", tone: "b" as const }]
     : []).filter(inView);
-  const pmPath = showMarks && s.mode === "rainbow" && epochs.length > 1 ? [expected!.at(epochs[0].ms), expected!.at(epochs[n - 1].ms)] : [];
+  let pmPath = showMarks && s.mode === "rainbow" && epochs.length > 1 ? [expected!.at(epochs[0].ms), expected!.at(epochs[n - 1].ms)] : [];
+  let allMarks = pmMarks as { x: number; y: number; label?: string; tone?: "now" | "a" | "b" }[];
+  if (planet && px.reveal) {
+    if (s.mode === "blink" && planet.track[frameIdx]) allMarks = [...allMarks, { ...planet.track[frameIdx], label: "simulated", tone: "b" as const }].filter(inView);
+    else if (s.mode === "rainbow") pmPath = planet.track;
+    else if (s.mode === "diff") allMarks = [...allMarks, ...[aIdx, bIdx].map((k) => ({ ...planet.track[k], label: "simulated", tone: "b" as const }))].filter(inView);
+  }
   const modeHelp: Record<Mode, string> = {
     blink: "Flip between pictures of the same patch of sky taken months or years apart. Stars hold still. Anything that jumps is moving.",
     rainbow: "Every date in one picture: the oldest is tinted blue, the newest orange. Stars add up to white. A mover leaves a coloured streak.",
@@ -292,6 +373,11 @@ export default function App() {
             {expected && (
               <>
                 <p className="note">The yellow ring marks where that motion puts it on each date.</p>
+                <p className="measured" data-testid="measured">
+                  {measured
+                    ? <>Measured in these images: <b>{measured.rate.toFixed(1)}″ per year</b>, heading {measured.dir}, from {measured.n} dates across {measured.spanYr.toFixed(1)} years. The catalogue says {expected.rate.toFixed(1)}″.</>
+                    : s.wise ? "Not enough clear detections yet to measure its motion from the pictures." : "Add the WISE images to measure its motion from the pictures."}
+                </p>
                 <label className="check"><input type="checkbox" checked={s.mark} onChange={(e) => set({ mark: e.target.checked })} data-testid="mark-toggle" /> Show expected position</label>
               </>
             )}
@@ -303,7 +389,7 @@ export default function App() {
             <div className="searchrow">
               <input id="coords" data-testid="coord-input" value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
                 placeholder="RA and Dec, or a target name" />
-              <button className="go" type="submit" data-testid="coord-go">Go</button>
+              <button className="go" type="submit" data-testid="coord-go" disabled={resolving}>Go</button>
             </div>
             <div className={`msg ${inputMsg?.kind ?? ""}`} data-testid="coord-msg" role="status">{inputMsg?.text ?? `Now showing ${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
             <p className="hint">Use decimal degrees, or a form like 08h55m10.8s -07d14m42s.</p>
@@ -341,8 +427,9 @@ export default function App() {
 
           <Viewer
             image={image} size={SIZE} fov={s.fov} ra={s.ra} dec={s.dec} crosshair={s.cross} busy={busy} picked={picked}
-            onHover={setHover} onPick={pick} caption={caption} marks={pmMarks} path={pmPath} hud={hud}
+            onHover={setHover} onPick={pick} caption={caption} marks={allMarks} path={pmPath} hud={hud}
           />
+          {px.on && <p className="simnote" data-testid="px-note">These pictures contain one simulated object. Everything else is real.</p>}
           <div className="under">
             <Readout hover={hover} value={hoverVal} />
             <span className="caption" data-testid="caption">{caption}{s.mode === "blink" && cur ? `, ${cur.wl.toFixed(2)} µm` : ""}</span>
@@ -362,7 +449,7 @@ export default function App() {
                 <input type="range" min="0.25" max="6" step="0.25" value={s.speed} onChange={(e) => set({ speed: +e.target.value })} aria-label="Playback speed" />
                 <span className="mono">{s.speed}/s</span>
               </label>
-              {cur && (cur.flags.length > 0
+              {cur && listing === "done" && (cur.flags.length > 0
                 ? <span className="badge warn" data-testid="flags" title={cur.flags.map((f) => `${f.replace(/_/g, " ")}: ${flagHelp(f)}`).join("\n")}>{cur.flags.length} quality {cur.flags.length === 1 ? "flag" : "flags"}</span>
                 : <span className="badge ok" title="No quality flags near the centre">clean</span>)}
             </div>
@@ -388,7 +475,7 @@ export default function App() {
           <Filmstrip epochs={epochs} thumbs={thumbs} marks={marks} onSelect={selectEpoch} />
           <Timeline epochs={epochs} marks={marks} onSelect={selectEpoch} />
           <p className="prog" data-testid="progress" role="status">
-            {framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · now fetching ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}` : ""}
+            {framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · now fetching ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}${listing === "full" ? ". Still checking wavelengths and quality flags for every exposure." : ""}` : ""}
           </p>
         </main>
 
@@ -436,12 +523,50 @@ export default function App() {
             {(s.pf != null || s.pt != null) && <button className="btn small" onClick={() => set({ pf: null, pt: null, frame: 0 })}>Use all passes</button>}
           </section>
 
+          <section data-testid="lightcurve-panel">
+            <h2 className="h">Brightness over time</h2>
+            {expected
+              ? <p className="dim">This object moves, so its brightness at one fixed spot is not a fair measure. The spectrum below is taken where it is now.</p>
+              : centre.state === "done" && centrePicked
+              ? <LightCurve curves={curves} kind={centrePicked.kind} />
+              : centre.state === "error"
+                ? <p className="dim">The brightness at the centre could not be measured.</p>
+                : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx data here." : <><i className="spin" /> Measuring whatever sits at the centre in every exposure…</>}</p>}
+          </section>
+
           <section data-testid="spectrum-panel">
             <h2 className="h">Spectrum</h2>
-            {spec.state === "idle" && <p className="dim">Click any star in the picture to plot its brightness at every wavelength SPHEREx measured, coloured by pass.</p>}
             {spec.state === "loading" && <p className="dim" role="status"><i className="spin" /> Measuring the spectrum there. Near the centre this takes a few seconds; far from it, up to a minute.</p>}
             {spec.state === "error" && <p className="alert">Spectrum failed: {spec.err}</p>}
-            {spec.state === "done" && picked && <Spectrum points={spec.points} title={`RA ${picked.ra.toFixed(5)}, Dec ${picked.dec.toFixed(5)} · 6″ aperture`} />}
+            {spec.state === "done" && picked && clickedPicked && <Spectrum picked={clickedPicked} title={`Where you clicked: RA ${picked.ra.toFixed(5)}, Dec ${picked.dec.toFixed(5)}`} />}
+            {spec.state === "idle" && (centrePicked && centrePicked.pts.length
+              ? <Spectrum picked={centrePicked} title={expected ? `${target?.name ?? "The object"}, measured where it is now` : "At the centre of the picture"} />
+              : <p className="dim" role="status">{centre.state === "done" ? "Nothing bright enough to measure at that spot." : <><i className="spin" /> Measuring brightness at every wavelength. This can take up to a minute the first time.</>}</p>)}
+            {spec.state !== "loading" && <p className="dim small">Click any star in the picture to see its spectrum instead.</p>}
+          </section>
+
+          <section data-testid="planetx-panel">
+            <h2 className="h">Could you spot a Planet X?</h2>
+            <p className="dim small">Hide a simulated distant planet in these real images, then try to find it. Nothing like it has been found; this tests whether the pictures could show one.</p>
+            <label className="check"><input type="checkbox" checked={px.on} onChange={(e) => setPx((v) => ({ ...v, on: e.target.checked, reveal: false, seed: e.target.checked ? Math.floor(Math.random() * 1e9) : v.seed }))} data-testid="px-toggle" /> Hide a simulated planet</label>
+            {px.on && (
+              <div className="pxbox">
+                <label className="field">Distance from the Sun
+                  <select value={px.dist} onChange={(e) => setPx((v) => ({ ...v, dist: +e.target.value, reveal: false }))} data-testid="px-dist">
+                    {[500, 2000, 5000, 20000].map((d) => <option key={d} value={d}>{d.toLocaleString("en")} times the Earth-Sun distance</option>)}
+                  </select></label>
+                <label className="field">Brightness
+                  <select value={px.snr} onChange={(e) => setPx((v) => ({ ...v, snr: +e.target.value, reveal: false }))} data-testid="px-snr">
+                    <option value={6}>Faint, barely above the noise</option><option value={12}>Medium</option><option value={30}>Bright</option>
+                  </select></label>
+                <p className="dim small">At that distance it swings {fmtArc(apparentMotion(px.dist).wobbleArcsec)} each way every year as the Earth moves, and drifts {fmtArc(apparentMotion(px.dist).driftArcsecYr)} a year along its orbit.</p>
+                {planet && planet.inView < Math.max(2, epochs.length / 2) && <p className="alert warn">That swing is wider than this picture, so it is out of view on most dates. Widen the field of view to about {Math.min(30, Math.max(Math.ceil(s.fov) + 3, Math.ceil(((2 * apparentMotion(px.dist).wobbleArcsec + apparentMotion(px.dist).driftArcsecYr * (epochs.length > 1 ? msToYear(epochs[n - 1].ms) - msToYear(epochs[0].ms) : 1)) * 1.6) / 60)))}′, or pick a larger distance.</p>}
+                <div className="row">
+                  <button className="btn small" onClick={() => setPx((v) => ({ ...v, reveal: !v.reveal }))} data-testid="px-reveal">{px.reveal ? "Hide the answer" : "Show where it is"}</button>
+                  <button className="btn small" onClick={() => setPx((v) => ({ ...v, seed: Math.floor(Math.random() * 1e9), reveal: false }))}>Hide it somewhere else</button>
+                </div>
+              </div>
+            )}
           </section>
         </aside>
       </div>
@@ -466,4 +591,9 @@ function compassDir(pmRa: number, pmDec: number): string {
   const ang = (Math.atan2(pmRa, pmDec) * 180) / Math.PI; // 0 = north, 90 = east
   const names = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
   return names[((Math.round(ang / 45) % 8) + 8) % 8];
+}
+
+/** An angle in arcseconds, written the way a person would say it. */
+function fmtArc(a: number): string {
+  return a >= 120 ? `${(a / 60).toFixed(a >= 600 ? 0 : 1)} arcminutes` : `${a >= 10 ? a.toFixed(0) : a.toFixed(1)} arcseconds`;
 }

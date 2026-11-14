@@ -75,6 +75,29 @@ def _check_stretch(stretch):
         raise HTTPException(400, "stretch must be asinh, linear or log")
 
 
+_resolve_cache: dict = {}
+
+
+@app.get("/resolve")
+def resolve(name: str = Query(..., min_length=1, max_length=80)):
+    """Look up an object name (star, galaxy, nebula...) with the CDS Sesame name service."""
+    key = " ".join(name.split()).lower()
+    if key not in _resolve_cache:
+        from astropy.coordinates import SkyCoord
+        from astropy.coordinates.name_resolve import NameResolveError
+        try:
+            c = SkyCoord.from_name(name)
+            _resolve_cache[key] = {"name": name.strip(), "ra": float(c.ra.deg), "dec": float(c.dec.deg)}
+        except NameResolveError:
+            _resolve_cache[key] = None
+        except Exception as e:  # noqa: BLE001 - network trouble: do not cache
+            raise HTTPException(502, f"name lookup service unavailable: {e}") from e
+    hit = _resolve_cache[key]
+    if hit is None:
+        raise HTTPException(404, f"no object called '{name.strip()}' was found")
+    return hit
+
+
 @app.get("/health")
 def health():
     return {"ok": True}

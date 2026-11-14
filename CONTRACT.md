@@ -90,3 +90,8 @@ Added by the SPHEREx backend (api/). Existing shapes are unchanged; everything b
 - **Timing**: first request for a position is slow (IRSA SIA query + one small S3 range read per frame,
   ~20-40 s for /frames with 250-550 frames); everything afterwards is served from the disk cache in
   well under a second. Run `api/scripts/precache.py` before a demo.
+
+### Added for the web app
+- `GET /resolve?name=` looks up an object name with the CDS Sesame service and returns `{"name","ra","dec"}`; 404 when unknown.
+- `GET /spectrum` also accepts `cra`,`cdec` (centre of the field on screen) so cached pixels are reused, and each point carries `halo_mjy_sr`: the brightness of the star's outer halo (ring 4-7 pixels out minus ring 10-13 pixels out). It is the usable brightness measure when the core is saturated; `flux_mjy_sr` is null for such points.
+- `/targets` entries may carry `kind` ("mover" or "variable"), and for movers `pm_mas_yr` and `epoch`.

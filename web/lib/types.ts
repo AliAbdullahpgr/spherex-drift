@@ -11,7 +11,12 @@ export type FramesResponse = {
   ra: number; dec: number; fov: number; frames: Frame[];
   passes: { pass: number; start: string; end: string; n_frames: number }[];
 };
-export type SpectrumPoint = { wavelength_um: number; flux_mjy_sr: number; err?: number; time?: string; pass: number; detector?: number; flags?: string[]; saturated?: boolean };
+export type SpectrumPoint = {
+  wavelength_um: number; flux_mjy_sr: number | null; err?: number | null; time?: string; pass: number; detector?: number;
+  flags?: string[]; saturated?: boolean;
+  /** Brightness of the star's outer halo: the usable measure when the core is saturated. */
+  halo_mjy_sr?: number | null;
+};
 export type SpectrumResponse = { points: SpectrumPoint[] };
 export type Img = { w: number; h: number; data: Float32Array };
 export type View = { ra: number; dec: number; fov: number };

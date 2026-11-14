@@ -8,7 +8,7 @@ const PW = process.env.PW_PATH || "/tmp/claude-0/-root/a8bcf302-aa8b-45ec-8621-8
 const { chromium } = require(PW);
 const BASE = process.env.BASE || "http://localhost:3000";
 const MOCK = process.env.QUERY === undefined;
-const Q = process.env.QUERY ?? "mock=1&detector=4";
+const Q = process.env.QUERY ?? "mock=1&detector=4&mode=blink";
 const OUT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../shots");
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -145,10 +145,10 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
   await page.fill('[data-testid=coord-input]', "Orion Nebula");
   await page.click('[data-testid=coord-go]');
   const m1 = await page.textContent('[data-testid=coord-msg]');
-  ok(/not one of the quick-pick/.test(m1), `${name}: "Orion Nebula" gives a clear no-match message`);
+  ok(/No object called|not one of the quick-pick/.test(m1), `${name}: "Orion Nebula" gives a clear no-match message`);
   await page.fill('[data-testid=coord-input]', "r");
   await page.click('[data-testid=coord-go]');
-  ok(/not one of the quick-pick/.test(await page.textContent('[data-testid=coord-msg]')), `${name}: "r" does not match R Draconis`);
+  ok(/No object called|not one of the quick-pick/.test(await page.textContent('[data-testid=coord-msg]')), `${name}: "r" does not match R Draconis`);
   await page.fill('[data-testid=coord-input]', "R Draconis");
   await page.click('[data-testid=coord-go]');
   await page.waitForTimeout(500);
@@ -159,7 +159,7 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
   ok(Math.abs(+new URL(page.url()).searchParams.get("ra") - 133.795129) < 1e-4, `${name}: quick-pick WISE 0855`);
 
   // URL state round trip + embed
-  await page.goto(`${BASE}/?${Q}&mode=rainbow&fov=10&stretch=log&wise=1&embed=1`);
+  await page.goto(`${BASE}/?${Q.replace("&mode=blink", "")}&mode=rainbow&fov=10&stretch=log&wise=1&embed=1`);
   await page.waitForSelector('[data-testid=viewer-canvas]');
   await loaded(page);
   ok(await page.$eval('[data-testid=mode-rainbow]', (e) => e.getAttribute("aria-selected") === "true"), `${name}: mode restored from URL`);

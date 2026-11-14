@@ -81,9 +81,22 @@ export async function getTargets(): Promise<Target[]> {
   try { return await getJSON<Target[]>("/targets"); } catch { return MOCK_TARGETS; }
 }
 
-export async function getFrames(v: View, signal?: AbortSignal): Promise<FramesResponse> {
-  if (mockMode) { await delay(250); return mockFrames(v.ra, v.dec, v.fov); }
-  return getJSON(`/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov, group: "detector", survey: "spherex" })}`, signal);
+/**
+ * List the exposures covering a position. `quick` skips the per-exposure check (wavelengths are then
+ * band centres and there are no quality flags) and answers in a few seconds instead of up to a minute.
+ */
+export async function getFrames(v: View, signal?: AbortSignal, quick = false): Promise<FramesResponse> {
+  if (mockMode) { await delay(quick ? 80 : 250); return mockFrames(v.ra, v.dec, v.fov); }
+  return getJSON(`/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov, group: "detector", survey: "spherex", probe: quick ? "false" : "true" })}`, signal);
+}
+
+/** Look up an object name (any star, galaxy, nebula) with the backend's name service. */
+export async function resolveName(name: string): Promise<{ name: string; ra: number; dec: number } | null> {
+  if (mockMode) return null;
+  const r = await fetch(`${API_URL}/resolve?${q({ name })}`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error("The name lookup service is not answering. Enter RA and Dec instead.");
+  return r.json();
 }
 
 export async function getWiseFrames(v: View, signal?: AbortSignal): Promise<FramesResponse> {
