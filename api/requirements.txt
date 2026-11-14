@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+astropy
+astroquery
+reproject
+photutils
+numpy
+scipy
+pillow
+httpx
+pyvo
+pytest

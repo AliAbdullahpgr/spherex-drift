@@ -10,3 +10,5 @@ api/scratch_wise/
 .env.*
 !.env.example
 .DS_Store
+next.log
+*.tsbuildinfo

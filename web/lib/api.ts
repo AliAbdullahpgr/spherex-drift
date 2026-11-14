@@ -1,0 +1,112 @@
+// The ONLY module that talks to the backend (or the mock). See CONTRACT.md.
+import type { Frame, FramesResponse, Img, SpectrumResponse, Target, View } from "./types";
+import { MOCK_TARGETS, mockFrameImage, mockFrames, mockSpectrum, mockStack, mockWise } from "./mock";
+
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+export const IMG_SIZE = 256;
+
+let mockMode = false;
+export function setMock(v: boolean) { mockMode = v; }
+export function isMock() { return mockMode; }
+
+/** Decide mock vs real. `?mock=1` forces mock; otherwise probe /health, fall back to mock if unreachable. */
+export async function detectBackend(forceMock: boolean): Promise<{ mock: boolean; reason?: string }> {
+  if (forceMock) { mockMode = true; return { mock: true, reason: "forced" }; }
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 3000);
+    const r = await fetch(`${API_URL}/health`, { signal: ctl.signal });
+    clearTimeout(t);
+    if (!r.ok) throw new Error("status " + r.status);
+    mockMode = false;
+    return { mock: false };
+  } catch {
+    mockMode = true;
+    return { mock: true, reason: "unreachable" };
+  }
+}
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const r = await fetch(API_URL + path, { signal });
+  if (!r.ok) {
+    let d = "";
+    try { d = (await r.json()).detail; } catch {}
+    throw new Error(`${r.status} ${d || r.statusText}`);
+  }
+  return r.json();
+}
+
+/** Parse float32 little-endian payload. Header X-Shape "h,w" preferred; tolerates a real .npy header. */
+export function parseNpy(buf: ArrayBuffer, shapeHeader?: string | null): Img {
+  let off = 0;
+  let h = 0, w = 0;
+  const u8 = new Uint8Array(buf);
+  if (u8[0] === 0x93 && u8[1] === 0x4e) { // \x93NUMPY
+    const major = u8[6];
+    const hl = major === 1 ? u8[8] | (u8[9] << 8) : new DataView(buf).getUint32(8, true);
+    off = (major === 1 ? 10 : 12) + hl;
+    const hdr = new TextDecoder().decode(u8.slice(major === 1 ? 10 : 12, off));
+    const m = hdr.match(/\((\d+),\s*(\d+)/);
+    if (m) { h = +m[1]; w = +m[2]; }
+  }
+  const n = (buf.byteLength - off) / 4;
+  if (shapeHeader) {
+    const p = shapeHeader.split(",").map((x) => parseInt(x.trim(), 10));
+    if (p.length >= 2 && p[0] * p[1] === n) { h = p[0]; w = p[1]; }
+  }
+  if (!h || !w || h * w !== n) { h = w = Math.round(Math.sqrt(n)); }
+  if (h * w !== n) throw new Error("Image payload has an unexpected size");
+  // copy to guarantee alignment; platform is little-endian in practice
+  const data = new Float32Array(n);
+  new Uint8Array(data.buffer).set(u8.subarray(off, off + n * 4));
+  return { w, h, data };
+}
+
+async function getNpy(path: string, signal?: AbortSignal): Promise<Img> {
+  const r = await fetch(API_URL + path, { signal });
+  if (!r.ok) {
+    let d = "";
+    try { d = (await r.json()).detail; } catch {}
+    throw new Error(`${r.status} ${d || r.statusText}`);
+  }
+  return parseNpy(await r.arrayBuffer(), r.headers.get("X-Shape"));
+}
+
+const q = (o: Record<string, string | number>) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
+
+export async function getTargets(): Promise<Target[]> {
+  if (mockMode) return MOCK_TARGETS;
+  try { return await getJSON<Target[]>("/targets"); } catch { return MOCK_TARGETS; }
+}
+
+export async function getFrames(v: View, signal?: AbortSignal): Promise<FramesResponse> {
+  if (mockMode) { await delay(250); return mockFrames(v.ra, v.dec, v.fov); }
+  return getJSON(`/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov, group: "detector", survey: "spherex" })}`, signal);
+}
+
+export async function getWiseFrames(v: View, signal?: AbortSignal): Promise<FramesResponse> {
+  if (mockMode) { await delay(150); return mockWise(v.ra, v.dec, v.fov); }
+  return getJSON(`/wise/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov })}`, signal);
+}
+
+/** Single exposure (SPHEREx or WISE). Uses the frame's own image_url so the backend controls routing. */
+export async function getFrameImage(f: Frame, v: View, signal?: AbortSignal): Promise<Img> {
+  if (mockMode) { await delay(120 + Math.random() * 200); return mockFrameImage(f.id, v.ra, v.dec, v.fov, IMG_SIZE); }
+  const u = new URL(f.image_url, API_URL + "/");
+  u.searchParams.set("ra", String(v.ra)); u.searchParams.set("dec", String(v.dec)); u.searchParams.set("fov", String(v.fov));
+  u.searchParams.set("size", String(IMG_SIZE)); u.searchParams.set("format", "npy");
+  return getNpy(u.pathname + u.search, signal);
+}
+
+export async function getStack(v: View, pass: number, detector: number, signal?: AbortSignal): Promise<Img> {
+  if (mockMode) { await delay(200 + Math.random() * 300); return mockStack(v.ra, v.dec, v.fov, pass, detector, IMG_SIZE); }
+  return getNpy(`/stack?${q({ ra: v.ra, dec: v.dec, fov: v.fov, pass, detector, size: IMG_SIZE, format: "npy" })}`, signal);
+}
+
+export async function getSpectrum(ra: number, dec: number, center: View, radiusArcsec = 6, signal?: AbortSignal): Promise<SpectrumResponse> {
+  if (mockMode) { await delay(300); return mockSpectrum(ra, dec, radiusArcsec, center, center.fov); }
+  // cra/cdec = centre of the field on screen: lets the backend reuse pixels it already has (fast).
+  return getJSON(`/spectrum?${q({ ra, dec, radius_arcsec: radiusArcsec, cra: center.ra, cdec: center.dec })}`, signal);
+}
