@@ -4,7 +4,7 @@ import * as api from "@/lib/api";
 import { fmtDec, fmtRA, resolveInput } from "@/lib/coords";
 import { animFrames, buildEpochs, defaultDetector, detectorInfo, fmtDate, flagHelp, groupOf, restOf, type AnimFrame, type Epoch } from "@/lib/epochs";
 import { combine, difference, levels, minusRest, normalise, paintDiff, rainbow, sharedLevels, toGray, type DiffField, type Norm } from "@/lib/render";
-import { lightCurve, pickMeasure } from "@/lib/photometry";
+import { lightCurve, pickMeasure, wiseLightCurve } from "@/lib/photometry";
 import { centroid, fitMotion, msToYear, type Sample } from "@/lib/motion";
 import { hideObject, PLANETX_DEFAULT, type PlanetXValue } from "@/lib/planetx";
 import PlanetXPanel from "./PlanetXPanel";
@@ -56,6 +56,7 @@ export default function App() {
   const [listedView, setListedView] = useState("");
   const [framesState, setFramesState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [framesErr, setFramesErr] = useState("");
+  const [sourceNote, setSourceNote] = useState("");
   const [wiseNote, setWiseNote] = useState("");
   const [ver, setVer] = useState(0); // bumps when an image arrives
   const cache = useRef(new Map<string, Norm>());
@@ -137,7 +138,7 @@ export default function App() {
     if (!ready) return;
     const ctl = new AbortController();
     setListedView(viewKey);
-    setFramesState("loading"); setFramesErr(""); setWiseNote(""); setPicked(null); setSpec({ state: "idle", points: [] });
+    setFramesState("loading"); setFramesErr(""); setSourceNote(""); setWiseNote(""); setPicked(null); setSpec({ state: "idle", points: [] });
     setCentre({ state: "idle", points: [] }); setAutoDet(null); setListing("quick");
     setSpx([]); setWise([]); // never show or request the previous position's exposures against the new one
     api.getWiseFrames(view, ctl.signal).then((w) => {
@@ -150,12 +151,15 @@ export default function App() {
         const quick = await api.getFrames(view, ctl.signal, true);
         if (ctl.signal.aborted) return;
         setSpx(quick.frames); setAutoDet(quick.frames.length ? defaultDetector(quick.frames) : null);
-        setFramesState("done"); setListing(quick.frames.length ? "full" : "done");
+        setSourceNote(quick.note || "");
+        setFramesState("done"); setListing(quick.frames.length && quick.source !== "dr1-mosaic" ? "full" : "done");
         if (!quick.frames.length) return;
         // 2. full list in the background: exact wavelengths and quality flags
-        const full = await api.getFrames(view, ctl.signal, false);
-        if (ctl.signal.aborted) return;
-        setSpx(full.frames); setListing("done");
+        if (quick.source !== "dr1-mosaic") {
+          const full = await api.getFrames(view, ctl.signal, false);
+          if (ctl.signal.aborted) return;
+          setSpx(full.frames); setListing("done");
+        }
         // 3. brightness of whatever sits at the centre, for the light curve and spectrum
         setCentre({ state: "loading", points: [] });
         try {
@@ -166,6 +170,7 @@ export default function App() {
       } catch (e: any) {
         if (ctl.signal.aborted) return;
         setFramesErr(e?.message ?? String(e)); setFramesState("error"); setListing("done");
+        setCentre({ state: "error", points: [] });
       }
     })();
     return () => ctl.abort();
@@ -337,7 +342,7 @@ export default function App() {
   }, [norms, shared, s.mode, s.diff, s.inv, s.bp, s.wp, s.stretch, curF, curNorm, aIdx, bIdx, epochs.length]); // eslint-disable-line
 
   const busy = useMemo(() => {
-    if (framesState === "loading") return "Asking the archive which exposures cover this patch of sky. This takes a few seconds.";
+    if (framesState === "loading" && !curNorm) return "Asking the archive which exposures cover this patch of sky. This takes a few seconds.";
     if (framesState === "error") return null;
     if (!epochs.length) return null;
     if (s.mode === "blink" && !curNorm) return `Fetching ${describe(epochs[frameIdx])} from the archive. This can take several seconds per image.`;
@@ -386,6 +391,7 @@ export default function App() {
   }, [expected, rawNorms, epochs, s.fov]);
   const centrePicked = useMemo(() => (centre.state === "done" ? pickMeasure(centre.points) : null), [centre]);
   const curves = useMemo(() => (centrePicked ? lightCurve(centrePicked) : []), [centrePicked]);
+  const wiseCurves = useMemo(() => wiseLightCurve(rawNorms, epochs, s.fov), [rawNorms, epochs, s.fov]);
   const clickedPicked = useMemo(() => (spec.state === "done" ? pickMeasure(spec.points) : null), [spec]);
 
   // ---- Catalogue failures must not look like a successful empty sky.
@@ -403,7 +409,7 @@ export default function App() {
     });
     return () => ctl.abort();
   }, [wantsGaia, viewKey, gaiaRetry]); // eslint-disable-line react-hooks/exhaustive-deps
-  const spxTimes = useMemo(() => epochs.filter((e) => e.survey === "spherex" && e.kind === "frame").map((e) => e.time), [epochs]);
+  const spxTimes = useMemo(() => epochs.filter((e) => e.survey === "spherex" && e.kind === "frame" && !e.flags.includes("dr1_mosaic")).map((e) => e.time), [epochs]);
   const knownTimesKey = pickKnownTimes(spxTimes).join(",");
   useEffect(() => {
     setKnown([]);
@@ -445,8 +451,8 @@ export default function App() {
     if (r.ok) {
       const t = targets.find((x) => x.name === r.label);
       if (t) setAnalysisTab(t.kind === "variable" ? "brightness" : "motion");
-      // movers need the long WISE baseline to show motion; variables are clearest as a blink
-      jump(r.ra, r.dec, r.label, t?.kind === "mover" ? { wise: true } : t?.kind === "variable" ? { wise: false, mode: "blink" } : {});
+      // WISE supplies the time baseline for both motion and variable-star brightness.
+      jump(r.ra, r.dec, r.label, t?.kind === "mover" ? { wise: true } : t?.kind === "variable" ? { wise: true, mode: "blink" } : {});
       return;
     }
     const name = text.trim();
@@ -485,7 +491,7 @@ export default function App() {
 
   const cur = curF ? epochs[curF.idx] : epochs[frameIdx];
   const many = !!curF && curF.members.length > 1;
-  const when = curF ? (many ? `${fmtDate(curF.from).slice(0, 7)} to ${fmtDate(curF.to).slice(0, 7)}` : fmtDate(curF.ms)) : "";
+  const when = cur?.flags.includes("dr1_mosaic") ? "DR1 · combined dates" : curF ? (many ? `${fmtDate(curF.from).slice(0, 7)} to ${fmtDate(curF.to).slice(0, 7)}` : fmtDate(curF.ms)) : "";
   const inFrame = new Set(curF?.members ?? []);
   const marks: Mark[] = epochs.map((_, i) => (animated ? (curF && i === curF.idx ? "active" : inFrame.has(i) ? "in" : "none") : s.mode === "rainbow" ? "in" : i === aIdx ? "a" : i === bIdx ? "b" : "none"));
   const hoverVal = hover && s.mode === "blink" && curNorm ? `${curNorm.n.data[hover.y * curNorm.n.w + hover.x].toFixed(1)} σ` : undefined;
@@ -591,7 +597,7 @@ export default function App() {
           </Viewer>
 
           <div className="screen-topline">
-            <span className="screen-label">{s.mode === "rainbow" ? "ALL DATES" : s.mode === "diff" ? "DIFFERENCE" : srcName || "SKY ARCHIVE"}</span>
+            <span className="screen-label">{cur?.flags.includes("dr1_mosaic") && s.mode === "blink" ? "DR1 MOSAIC · COMBINED DATES" : s.mode === "rainbow" ? "ALL DATES" : s.mode === "diff" ? "DIFFERENCE" : srcName || "SKY ARCHIVE"}</span>
             {px.on && <span className="simulation-tag" data-testid="px-note">Simulated object added</span>}
           </div>
           <div className={`coordinate-readout ${hover ? "has-point" : ""}`}><Readout hover={hover} value={hoverVal} /></div>
@@ -703,7 +709,8 @@ export default function App() {
             <label className="check"><input type="checkbox" role="switch" checked={s.cross} onChange={(e) => set({ cross: e.target.checked })} /> Crosshair</label>
             <label className="check"><input type="checkbox" role="switch" checked={ov.gaia} onChange={(e) => setOv((o) => ({ ...o, gaia: e.target.checked }))} data-testid="ov-gaia" /> Gaia stars</label>
             <label className="check"><input type="checkbox" role="switch" checked={ov.motion} onChange={(e) => setOv((o) => ({ ...o, motion: e.target.checked }))} data-testid="ov-motion" /> Motion vectors</label>
-            <label className="check"><input type="checkbox" role="switch" checked={ov.known} onChange={(e) => { const checked = e.target.checked; setOv((o) => ({ ...o, known: checked })); if (checked) set({ src: "frame", wise: false, frame: 0 }); }} data-testid="ov-known" /> Known asteroids</label>
+            <label className="check"><input type="checkbox" role="switch" checked={ov.known} disabled={sourceNote.includes("mosaic")} onChange={(e) => { const checked = e.target.checked; setOv((o) => ({ ...o, known: checked })); if (checked) set({ src: "frame", wise: false, frame: 0 }); }} data-testid="ov-known" /> Known asteroids</label>
+            {sourceNote.includes("mosaic") && <p className="dim small">Asteroid matching needs individual exposure dates and is unavailable for a mosaic.</p>}
             {wantsGaia && <div role="status" className="dim small" data-testid="gaia-status">{gaiaStatus.text}{gaiaStatus.error && <button type="button" className="btn small" onClick={() => retryGaia((n) => n + 1)}>Retry Gaia</button>}</div>}
             {ov.known && <div role="status" className="dim small" data-testid="known-status">
               {knownStatus.text}
@@ -733,6 +740,7 @@ export default function App() {
 
           <section>
             <h3 className="h">Exposure map</h3>
+            {sourceNote && <details className="dim small"><summary>Data sources</summary><p data-testid="data-source">{sourceNote}</p></details>}
             <p className="dim small">Choose a band and pass. Drag to select a range.</p>
             <Pad
               frames={spx} detector={det} passFrom={passFrom} passTo={passTo} currentPass={cur?.survey === "spherex" ? cur.pass : null}
@@ -775,6 +783,7 @@ export default function App() {
           <div role="tabpanel" id="analysis-spectrum" aria-labelledby="analysis-tab-spectrum" hidden={analysisTab !== "spectrum"}>
           <section id="spectrum-tools" tabIndex={-1} data-testid="spectrum-panel">
             <h2 className="h">Spectrum</h2>
+            {sourceNote && <p className="dim small" data-testid="spectrum-source">{sourceNote}</p>}
             {spec.state === "loading" && <div role="status" data-testid="spectrum-loading">
               <p className="dim"><i className="spin" /> Measuring the spectrum · {specSeconds}s of 30s. {specSeconds >= 10 ? "The archive is still fetching pixels for this spot." : "Checking the available exposures."}</p>
               <button type="button" className="btn small" data-testid="spectrum-cancel" onClick={() => { spectrumRequest.current?.abort(); setSpec({ state: "error", points: [], err: "Measurement cancelled." }); }}>Cancel</button>
@@ -799,6 +808,8 @@ export default function App() {
             <h2 className="h">Brightness</h2>
             {expected
               ? <p className="dim">Moving target: fixed-position brightness is unreliable. Use Spectrum.</p>
+              : sourceNote.includes("mosaic")
+              ? <><p className="dim small">The DR1 mosaic combines dates. This trend uses the separate WISE epochs.</p><LightCurve curves={wiseCurves} kind={wiseCurves.some(c => c.measurement === "halo") ? "halo" : "flux"} quickLook /></>
               : centre.state === "done" && centrePicked
               ? <LightCurve curves={curves} kind={centrePicked.kind} />
               : centre.state === "error"

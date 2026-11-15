@@ -49,7 +49,7 @@ export default function Spectrum({ picked, title }: { picked: Picked; title: str
         {passes.map((p) => <span key={p}><i className="dot" style={{ background: col(p) }} /> pass {p}</span>)}
         
       </div>
-      <p className="dim small">Colour = observing pass.{picked.kind === "halo" ? " Saturated core; outer-halo measurement." : ""}</p>
+      <p className="dim small">Colour = observing pass.{picked.kind === "halo" ? " Masked or saturated core; outer-halo measurement." : ""}</p>
       <details className="measurement-data" data-testid="spectrum-data">
         <summary>View spectrum measurements as a table</summary>
         <div className="data-table" tabIndex={0} role="region" aria-label="Spectrum measurements, scroll horizontally if needed">

@@ -9,6 +9,7 @@ export type Frame = {
 };
 export type FramesResponse = {
   ra: number; dec: number; fov: number; frames: Frame[];
+  source?: string; note?: string;
   passes: { pass: number; start: string; end: string; n_frames: number }[];
 };
 export type SpectrumPoint = {

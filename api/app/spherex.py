@@ -79,16 +79,23 @@ def _parse_row(row):
 
 
 def _sia_query(ra, dec):
-    from astroquery.ipac.irsa import Irsa
+    from astropy.table import Table
     last = None
-    for i in range(6):
+    # Avoid PyVO service discovery and its unbounded retries on an archive outage.
+    # A direct SIA2 request has the same collection/position semantics.
+    params = [("COLLECTION", c) for c in config.COLLECTIONS]
+    params.append(("POS", f"CIRCLE {ra} {dec} {config.SIA_RADIUS_ARCMIN / 60}"))
+    for i in range(2):
         try:
-            res = Irsa.query_sia(pos=(SkyCoord(ra, dec, unit="deg"), config.SIA_RADIUS_ARCMIN * u.arcmin),
-                                 collection=config.COLLECTIONS)
+            r = httpx.get("https://irsa.ipac.caltech.edu/SIA", params=params,
+                          timeout=httpx.Timeout(6, connect=3), follow_redirects=True)
+            r.raise_for_status()
+            res = Table.read(io.BytesIO(r.content), format="votable")
             return [_parse_row(r) for r in res]
         except Exception as e:  # noqa: BLE001  (IRSA throws transient 502/503)
             last = e
-            time.sleep(min(2.0 * 2 ** i, 20))
+            if i == 0:
+                time.sleep(0.25)
     raise RuntimeError(f"IRSA SIA query failed: {last!r}"[:300])
 
 

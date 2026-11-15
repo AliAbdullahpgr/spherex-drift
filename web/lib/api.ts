@@ -7,6 +7,8 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/
 export const IMG_SIZE = 256;
 
 let mockMode = false;
+const fieldSources = new Map<string, string>();
+const fieldKey = (v: View) => `${v.ra.toFixed(5)}|${v.dec.toFixed(5)}|${v.fov}`;
 export function setMock(v: boolean) { mockMode = v; }
 export function isMock() { return mockMode; }
 
@@ -15,7 +17,7 @@ export async function detectBackend(forceMock: boolean): Promise<{ mock: boolean
   if (forceMock) { mockMode = true; return { mock: true, reason: "forced" }; }
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 3000);
+    const t = setTimeout(() => ctl.abort(), 12000);
     const r = await fetch(`${API_URL}/health`, { signal: ctl.signal });
     clearTimeout(t);
     if (!r.ok) throw new Error("status " + r.status);
@@ -104,7 +106,9 @@ export async function getTargets(): Promise<Target[]> {
  */
 export async function getFrames(v: View, signal?: AbortSignal, quick = false): Promise<FramesResponse> {
   if (mockMode) { await delay(quick ? 80 : 250); return mockFrames(v.ra, v.dec, v.fov); }
-  return getJSON(`/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov, group: "detector", survey: "spherex", probe: quick ? "false" : "true" })}`, signal);
+  const result = await getJSON<FramesResponse>(`/frames?${q({ ra: v.ra, dec: v.dec, fov: v.fov, group: "detector", survey: "spherex", probe: quick ? "false" : "true" })}`, signal);
+  fieldSources.set(fieldKey(v), result.source || "exposures");
+  return result;
 }
 
 /** Look up an object name (any star, galaxy, nebula) with the backend's name service. */
@@ -140,6 +144,6 @@ export async function getStack(v: View, pass: number, detector: number, signal?:
 export async function getSpectrum(ra: number, dec: number, center: View, radiusArcsec = 6, signal?: AbortSignal): Promise<SpectrumResponse> {
   if (mockMode) { await delay(300); return mockSpectrum(ra, dec, radiusArcsec, center, center.fov); }
   // cra/cdec = centre of the field on screen: lets the backend reuse pixels it already has (fast).
-  return getJSON(`/spectrum?${q({ ra, dec, radius_arcsec: radiusArcsec, cra: center.ra, cdec: center.dec })}`, signal, 30000,
+  return getJSON(`/spectrum?${q({ ra, dec, radius_arcsec: radiusArcsec, cra: center.ra, cdec: center.dec, fov: center.fov, source: fieldSources.get(fieldKey(center)) || "exposures" })}`, signal, 30000,
     "The archive took longer than 30 seconds. Try again, or choose a spot closer to the centre.");
 }

@@ -39,6 +39,7 @@ from . import wise_grid as G
 LAMBDA_URL = os.environ.get("WISE_LAMBDA_URL", "https://moo23y1au0.execute-api.us-west-2.amazonaws.com/default/png-animation")
 S3_BASE = os.environ.get("WISE_S3_BASE", "https://amnh-citsci-public.s3-us-west-2.amazonaws.com/")
 CACHE_DIR = Path(os.environ.get("WISE_CACHE_DIR", config.CACHE_DIR / "wise"))
+PREPARED = config.API_ROOT / "prepared" / "wise"
 BANDS = {1: 3.4, 2: 4.6}
 # PNG value = 255*(flux-min)/(max-min); flux in unWISE "Vega nanomaggies"-like counts.
 RANGES = {"lo": (-30.0, 225.0), "hi": (-300.0, 30000.0)}
@@ -49,6 +50,17 @@ router = APIRouter(prefix="/wise")
 
 _sems: dict = {}
 _locks: dict = {}
+
+
+def _prepared_dir(ra, dec, fov):
+    if abs(fov - 5) > 1e-6:
+        return None
+    for t in config.TARGETS:
+        if abs(t["ra"] - ra) < 1e-5 and abs(t["dec"] - dec) < 1e-5:
+            directory = PREPARED / t["id"]
+            if (directory / "frames.json").exists():
+                return directory
+    return None
 
 
 def _sem(name: str, n: int) -> asyncio.Semaphore:
@@ -196,6 +208,9 @@ def _check(ra, dec, fov):
 @router.get("/frames")
 async def wise_frames(ra: float, dec: float, fov: float = 5.0, size: int = 256):
     _check(ra, dec, fov)
+    prepared = _prepared_dir(ra, dec, fov)
+    if prepared:
+        return json.loads((prepared / "frames.json").read_text())
     async with httpx.AsyncClient() as client:
         res = await asyncio.gather(*[_covered_epochs(client, ra, dec, fov, b) for b in BANDS])
     rows = []
@@ -241,6 +256,12 @@ def _build_array(ra, dec, fov, size, meta_lo, e_lo, png_lo, png_hi, meta_hi) -> 
 
 
 async def _frame_array(ra, dec, fov, size, band, mjd) -> np.ndarray:
+    prepared = _prepared_dir(ra, dec, fov)
+    if prepared and size == 256:
+        file = prepared / f"{_frame_id(band, mjd)}.npz"
+        if file.exists():
+            with np.load(file, allow_pickle=False) as z:
+                return z["image"].copy()
     key = _h("img", f"{ra:.5f}", f"{dec:.5f}", f"{fov:.4f}", size, band, f"{mjd:.3f}")
     path = CACHE_DIR / "img" / f"{key}.npy"
     if path.exists():
@@ -278,6 +299,6 @@ async def wise_image(frame_id: str, ra: float, dec: float, fov: float = 5.0,
         raw = np.ascontiguousarray(arr.astype("<f4")).tobytes()
         return Response(raw, media_type="application/octet-stream",
                         headers={"X-Shape": f"{arr.shape[0]},{arr.shape[1]}",
-                                 "Cache-Control": "public, max-age=3600"})
+                                 "Cache-Control": "public, max-age=3600, s-maxage=86400"})
     png = await asyncio.to_thread(G.to_png, arr, stretch)
-    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600, s-maxage=86400"})

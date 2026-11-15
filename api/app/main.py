@@ -7,7 +7,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, imaging, spherex
+from . import config, imaging, spherex, mosaic
 
 app = FastAPI(title="SPHEREx Drift API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS, allow_methods=["*"],
@@ -123,7 +123,13 @@ def frames(ra: float, dec: float, fov: float = config.DEFAULT_FOV_ARCMIN,
         raise HTTPException(400, "group must be detector or band")
     if survey != "spherex":
         return {"ra": ra, "dec": dec, "fov": fov, "frames": [], "passes": []}
-    recs, info = _upstream(lambda: spherex.frame_list(ra, dec, do_probe=probe))
+    if (mosaic.PREPARED / f"{mosaic._field_key(ra, dec, fov)}.npz").exists():
+        return _clean(mosaic.frames(ra, dec, fov, size))
+    try:
+        recs, info = spherex.frame_list(ra, dec, do_probe=probe)
+    except Exception:
+        # The independently hosted DR1 FITS cube remains usable during an SIA outage.
+        return _clean(_upstream(lambda: mosaic.frames(ra, dec, fov, size)))
     q = urlencode({"ra": ra, "dec": dec, "fov": fov, "stretch": stretch, "size": size})
     out = []
     for r, i in zip(recs, info):
@@ -144,6 +150,17 @@ def frames(ra: float, dec: float, fov: float = config.DEFAULT_FOV_ARCMIN,
             counts[g] = counts.get(g, 0) + 1
         res["groups"] = {"by": key, "counts": {str(k): v for k, v in sorted(counts.items())}}
     return _clean(res)
+
+
+@app.get("/mosaic/image/{band}")
+def mosaic_image(band: int, ra: float, dec: float, fov: float = 5,
+                 size: int = config.DEFAULT_SIZE, format: str = "png", stretch: str = "asinh"):
+    _pos(ra, dec); _fov(fov); _size(size); _check_stretch(stretch)
+    if not 1 <= band <= 6:
+        raise HTTPException(400, "mosaic band must be 1..6")
+    arr = _upstream(lambda: mosaic.image(ra, dec, fov, size, band))
+    return _array_response(arr, format, stretch, {"X-Unit": "MJy/sr",
+                           "Cache-Control": "public, max-age=3600, s-maxage=86400"})
 
 
 @app.get("/image/{frame_id}")
@@ -171,6 +188,13 @@ def stack(ra: float, dec: float, detector: int, fov: float = config.DEFAULT_FOV_
     _pos(ra, dec); _fov(fov); _size(size); _check_stretch(stretch)
     if not 1 <= detector <= 6:
         raise HTTPException(400, "detector must be 1..6")
+    prepared_mosaic = mosaic.PREPARED / f"{mosaic._field_key(ra, dec, fov)}.npz"
+    if prepared_mosaic.exists():
+        if pass_ != 1:
+            raise HTTPException(404, "The DR1 mosaic is a coadd, not a set of observing passes")
+        arr = _upstream(lambda: mosaic.image(ra, dec, fov, size, detector))
+        return _array_response(arr, format, stretch, {"X-N-Frames": "17", "X-Unit": "MJy/sr",
+              "Cache-Control": "public, max-age=3600, s-maxage=86400"})
     res = _upstream(lambda: spherex.stack_cutouts(ra, dec, fov, size, pass_, detector, wmin, wmax))
     if res is None:
         raise HTTPException(404, "no frames for this pass/detector/wavelength range at this position")
@@ -183,10 +207,19 @@ def stack(ra: float, dec: float, detector: int, fov: float = config.DEFAULT_FOV_
 
 @app.get("/spectrum")
 def spectrum(ra: float, dec: float, radius_arcsec: float = 6.0,
-             cra: Optional[float] = None, cdec: Optional[float] = None):
+             cra: Optional[float] = None, cdec: Optional[float] = None,
+             source: Optional[str] = None, fov: float = 5):
     _pos(ra, dec)
     if not 1 <= radius_arcsec <= 60:
         raise HTTPException(400, "radius_arcsec must be in [1, 60]")
+    _fov(fov)
+    if cra is not None and cdec is not None:
+        _pos(cra, cdec)
+    center_ra, center_dec = cra if cra is not None else ra, cdec if cdec is not None else dec
+    prepared_mosaic = mosaic.PREPARED / f"{mosaic._field_key(center_ra, center_dec, fov)}.npz"
+    if source == "dr1-mosaic" or (source != "native" and prepared_mosaic.exists()):
+        return _clean(_upstream(lambda: mosaic.spectrum(ra, dec, cra if cra is not None else ra,
+                                  cdec if cdec is not None else dec, fov, radius_arcsec)))
     pts, n = _upstream(lambda: spherex.spectrum(ra, dec, radius_arcsec, cra, cdec))
     return _clean({"points": pts, "unit": spherex.UNIT, "radius_arcsec": radius_arcsec,
             "n_frames": n, "n_points": len(pts), "n_excluded": n - len(pts),

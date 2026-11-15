@@ -46,6 +46,12 @@ export function buildEpochs(spx: Frame[], wise: Frame[], o: EpochOpts): Epoch[] 
     for (const p of passes) {
       const fs = det.filter((f) => f.pass === p);
       const ms = mean(fs.map((f) => Date.parse(f.time)));
+      if (fs[0]?.flags.includes("dr1_mosaic")) {
+        const f = fs[0];
+        out.push({ key: `s:mosaic:${o.detector}`, survey: "spherex", kind: "frame", label: "DR1 spectral mosaic",
+          time: f.time, ms, pass: p, detector: o.detector, wl: f.wavelength_um, flags: f.flags, n: 1, frame: f });
+        continue;
+      }
       out.push({
         key: `s:stack:${p}:${o.detector}`, survey: "spherex", kind: "stack", label: `Pass ${p} stack`, time: new Date(ms).toISOString(), ms,
         pass: p, detector: o.detector, wl: mean(fs.map((f) => f.wavelength_um)), flags: [...new Set(fs.flatMap((f) => f.flags))], n: fs.length,
@@ -53,7 +59,7 @@ export function buildEpochs(spx: Frame[], wise: Frame[], o: EpochOpts): Epoch[] 
     }
   } else {
     for (const f of [...det].sort((a, b) => Date.parse(a.time) - Date.parse(b.time))) {
-      out.push({ key: `s:frame:${f.id}`, survey: "spherex", kind: "frame", label: `Pass ${f.pass} exposure`, time: f.time, ms: Date.parse(f.time), pass: f.pass, detector: o.detector, wl: f.wavelength_um, flags: f.flags, n: 1, frame: f });
+      out.push({ key: `s:frame:${f.id}`, survey: "spherex", kind: "frame", label: f.flags.includes("dr1_mosaic") ? "DR1 spectral mosaic" : `Pass ${f.pass} exposure`, time: f.time, ms: Date.parse(f.time), pass: f.pass, detector: o.detector, wl: f.wavelength_um, flags: f.flags, n: 1, frame: f });
     }
   }
   if (o.includeWise && wise.length) {
@@ -110,6 +116,8 @@ export function restOf(epochs: Epoch[], f: AnimFrame): number[] {
 export const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 export const FLAG_HELP: Record<string, string> = {
+  dr1_mosaic: "SPHEREx DR1 spectral coadd combining dates; this is not an individual exposure or a variability measurement.",
+  partial_coverage: "Only part of this field has WISE coverage at this date; missing pixels are masked.",
   contaminated: "Another source or a ghost may be contaminating this frame near the target.",
   saturated: "Some pixels near the target are saturated; brightness is unreliable.",
   cosmic_ray: "A cosmic-ray hit was masked near the target.",

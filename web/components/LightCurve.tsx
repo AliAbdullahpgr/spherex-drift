@@ -6,7 +6,7 @@ const BAND = ["#4c9cff", "#56c4e8", "#8fd9b6", "#f0e09a", "#ffb454", "#ff7a3d"];
 const month = (ms: number) => new Date(ms).toLocaleString("en", { month: "short", year: "numeric", timeZone: "UTC" });
 
 /** Brightness over time. Each line is one wavelength band, scaled so its first pass is 100%. */
-export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "flux" | "halo" }) {
+export default function LightCurve({ curves, kind, quickLook = false }: { curves: Curve[]; kind: "flux" | "halo"; quickLook?: boolean }) {
   const usable = curves.filter((c) => c.points[0].v > 0 && Number.isFinite(c.change));
   if (!usable.length) return <p className="dim">Not enough clean measurements here to follow brightness over time.</p>;
   const W = 320, H = 190, L = 40, R = 10, T = 10, B = 26;
@@ -26,7 +26,7 @@ export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "f
   return (
     <figure className="spectrum" data-testid="lightcurve">
       <p className="finding">
-        {steady
+        {quickLook ? <>Relative WISE brightness across {dates.length} observing dates.</> : steady
           ? <>No change clear of the measurement scatter between {month(dates[0].ms)} and {month(dates[dates.length - 1].ms)}.</>
           : <>At {strongest.wl.toFixed(1)} µm it was <b>{pct}% {strongest.change < 0 ? "fainter" : "brighter"}</b> in {month(strongest.points[strongest.points.length - 1].ms)} than in {month(strongest.points[0].ms)}.</>}
       </p>
@@ -35,7 +35,7 @@ export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "f
         {ticks.map((v) => (
           <g key={v}><line x1={L} x2={W - R} y1={Y(v)} y2={Y(v)} stroke={v === 100 ? "#5a574f" : "#1d1c19"} strokeDasharray={v === 100 ? "4 4" : undefined} /><text x={L - 7} y={Y(v) + 4} fill="#96928a" fontSize="11" textAnchor="end">{v}%</text></g>
         ))}
-        {dates.map((p) => <text key={p.pass} x={X(p.ms)} y={H - B + 15} fill="#96928a" fontSize="11" textAnchor={X(p.ms) < L + 30 ? "start" : X(p.ms) > W - R - 30 ? "end" : "middle"}>{month(p.ms)}</text>)}
+        {dates.filter((_, i) => i % Math.max(1, Math.ceil(dates.length / 4)) === 0 || i === dates.length - 1).map((p) => <text key={p.pass} x={X(p.ms)} y={H - B + 15} fill="#96928a" fontSize="11" textAnchor={X(p.ms) < L + 30 ? "start" : X(p.ms) > W - R - 30 ? "end" : "middle"}>{month(p.ms)}</text>)}
         {usable.map((c) => (
           <g key={c.det} data-testid="lc-line">
             <polyline points={c.points.map((p) => `${X(p.ms)},${Y((p.v / c.points[0].v) * 100)}`).join(" ")} fill="none" stroke={BAND[(c.det - 1) % 6]} strokeWidth="1.6" strokeLinejoin="round" />
@@ -47,6 +47,7 @@ export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "f
         {usable.map((c) => <span key={c.det}><i className="dot" style={{ background: BAND[(c.det - 1) % 6] }} />{c.wl.toFixed(1)} µm</span>)}
       </div>
       <p className="dim small">First pass = 100%.{kind === "halo" ? " Saturated core; outer-halo measurement." : ""}</p>
+      {quickLook && <p className="dim small">Quick-look aperture measurements from linear WISE preview pixels, not precision photometry. Saturation, blending and background changes can affect this trend.</p>}
       <details className="measurement-data" data-testid="lightcurve-data">
         <summary>View brightness measurements as a table</summary>
         <div className="data-table" tabIndex={0} role="region" aria-label="Brightness over time measurements, scroll horizontally if needed">

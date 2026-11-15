@@ -1,5 +1,7 @@
 // Turns the per-exposure measurements from /spectrum into a spectrum and a light curve.
 import type { SpectrumPoint } from "./types";
+import type { Epoch } from "./epochs";
+import type { Norm } from "./render";
 
 export type Measure = { wl: number; v: number; err: number; pass: number; ms: number; det: number };
 export type Picked = { pts: Measure[]; kind: "flux" | "halo" };
@@ -25,7 +27,50 @@ export function pickMeasure(points: SpectrumPoint[]): Picked {
 
 export type CurvePoint = { pass: number; ms: number; v: number; n: number; err: number };
 /** change = last pass / first pass - 1; sigma = how many times larger that change is than its own uncertainty. */
-export type Curve = { det: number; wl: number; points: CurvePoint[]; change: number; sigma: number };
+export type Curve = { det: number; wl: number; points: CurvePoint[]; change: number; sigma: number; measurement?: "aperture" | "halo" };
+
+/** Relative aperture brightness in the real linear WISE preview pixels.
+ * Restore each image's original scale before comparing dates (display sigma varies).
+ * This is a quick-look trend, not calibrated catalogue photometry.
+ */
+export function wiseLightCurve(norms: (Norm | null)[], epochs: Epoch[], fov: number): Curve[] {
+  const by = new Map<number, CurvePoint[]>();
+  // The high-range upstream PNG clips at 30,000 linear units. Use the same
+  // outer-halo aperture on every date when any epoch's centre reaches that limit.
+  const useHalo = norms.some((n, i) => n && epochs[i]?.survey === "wise" &&
+    n.data[Math.floor(n.h / 2) * n.w + Math.floor(n.w / 2)] * (n.sigma ?? 1) > 28500);
+  epochs.forEach((e, i) => {
+    const n = norms[i];
+    if (!n || e.survey !== "wise") return;
+    const radius = Math.max(2, 6 / (fov * 60 / n.w));
+    const haloInner = 24 / (fov * 60 / n.w), haloOuter = 42 / (fov * 60 / n.w);
+    const skyInner = useHalo ? 60 / (fov * 60 / n.w) : radius * 2.5;
+    const skyOuter = useHalo ? 78 / (fov * 60 / n.w) : radius * 4;
+    const cx = (n.w - 1) / 2, cy = (n.h - 1) / 2;
+    const aperture: number[] = [], sky: number[] = [];
+    let expected = 0;
+    for (let y = Math.max(0, Math.floor(cy - skyOuter)); y <= Math.min(n.h - 1, Math.ceil(cy + skyOuter)); y++) {
+      for (let x = Math.max(0, Math.floor(cx - skyOuter)); x <= Math.min(n.w - 1, Math.ceil(cx + skyOuter)); x++) {
+        const r = Math.hypot(x - cx, y - cy);
+        const v = n.data[y * n.w + x] * (n.sigma ?? 1);
+        if (useHalo ? r >= haloInner && r <= haloOuter : r <= radius) { expected++; if (Number.isFinite(v)) aperture.push(v); }
+        else if (r >= skyInner && r <= skyOuter && Number.isFinite(v)) sky.push(v);
+      }
+    }
+    if (aperture.length < expected * .8 || sky.length < 10) return;
+    const bg = median(sky), v = aperture.reduce((sum, x) => sum + x - bg, 0);
+    if (!(v > 0)) return;
+    const err = 1.4826 * median(sky.map(x => Math.abs(x - bg))) * Math.sqrt(aperture.length);
+    const points = by.get(e.wl) ?? [];
+    points.push({ pass: e.pass, ms: e.ms, v, err, n: 1 }); by.set(e.wl, points);
+  });
+  return [...by.entries()].filter(([, points]) => points.length >= 3).map(([wl, points]) => {
+    points.sort((a, b) => a.ms - b.ms);
+    const a = points[0], b = points[points.length - 1];
+    return { det: wl < 4 ? 1 : 2, wl, points, change: b.v / a.v - 1, sigma: 0,
+      measurement: useHalo ? "halo" : "aperture" };
+  });
+}
 
 /** One line per detector (wavelength band): the median brightness in each pass. */
 export function lightCurve(picked: Picked): Curve[] {
