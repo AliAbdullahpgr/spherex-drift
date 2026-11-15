@@ -33,11 +33,12 @@ from astropy.time import Time
 from fastapi import APIRouter, HTTPException, Query, Response
 from PIL import Image
 
+from . import config
 from . import wise_grid as G
 
 LAMBDA_URL = os.environ.get("WISE_LAMBDA_URL", "https://moo23y1au0.execute-api.us-west-2.amazonaws.com/default/png-animation")
 S3_BASE = os.environ.get("WISE_S3_BASE", "https://amnh-citsci-public.s3-us-west-2.amazonaws.com/")
-CACHE_DIR = Path(os.environ.get("WISE_CACHE_DIR", Path(__file__).resolve().parent.parent / "cache" / "wise"))
+CACHE_DIR = Path(os.environ.get("WISE_CACHE_DIR", config.CACHE_DIR / "wise"))
 BANDS = {1: 3.4, 2: 4.6}
 # PNG value = 255*(flux-min)/(max-min); flux in unWISE "Vega nanomaggies"-like counts.
 RANGES = {"lo": (-30.0, 225.0), "hi": (-300.0, 30000.0)}

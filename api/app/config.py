@@ -37,7 +37,8 @@ DEFAULT_SIZE = 256
 MAX_SIZE = 1024
 SIA_RADIUS_ARCMIN = 1.0        # SIA cone radius; footprint test is done locally
 
-CORS_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "SPHEREX_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
 
 # --- targets (ICRS, epoch ~2026.0 for movers so the star is where SPHEREx saw it) ---
 # Barnard / eps Indi B / RW Aur / R Dra: Gaia DR3 (epoch 2016.0) propagated
