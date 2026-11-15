@@ -1,0 +1,13 @@
+NASA data: SPHEREx DR1 spectral all-sky cubes, DOI https://doi.org/10.26131/IRSA679, accessed through the NASA/IPAC IRSA S3 mirror. Product documentation: https://caltech-ipac.github.io/spherex-archive-documentation/spherex-data-products/
+
+NASA WISE/NEOWISE observations through time-resolved unWISE images served by WiseView: https://irsa.ipac.caltech.edu/data/WISE/unWISE/overview.html ; https://unwise.me/ ; https://github.com/backyardworlds/wiseview
+
+Supporting resources: ESA Gaia DR3; CDS VizieR, SIMBAD/Sesame and HiPS2FITS; Legacy Surveys; Pan-STARRS; and the implemented IMCCE SkyBoT service for dated exposures. Their roles and source links are documented in the full references.
+
+Software: Python, FastAPI, Uvicorn, Astropy, astropy-healpix, NumPy, SciPy, reproject, Photutils, Pillow, HTTPX, Astroquery/PyVO, Next.js, React and TypeScript. Testing uses pytest, Vitest, Playwright and axe-core. Hosting: Vercel. Fonts: Geist, Geist Mono and Instrument Serif.
+
+Full references and acknowledgements: https://github.com/AliAbdullahpgr/spherex-drift/blob/build/docs/submission/references.md
+Prepared-data provenance and checksums: https://github.com/AliAbdullahpgr/spherex-drift/blob/build/api/prepared/manifest.json
+Source code: https://github.com/AliAbdullahpgr/spherex-drift/tree/build
+
+AI development and image-editing assistance is disclosed in the AI Use field.
