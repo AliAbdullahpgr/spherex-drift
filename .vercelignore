@@ -1,0 +1,14 @@
+.git
+.vercel
+**/.vercel
+**/node_modules
+**/.next
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/.env*
+!**/.env.example
+**/*.pyc
+**/*.tsbuildinfo
+api/cache
+api/scratch_wise

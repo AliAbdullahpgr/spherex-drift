@@ -23,6 +23,7 @@ async function check(name, fn) {
 async function bind(p) {
   raw = p; page = withCinemaNavigation(p); p.setDefaultTimeout(15000);
   p.on("pageerror", e => errors.push(e.message));
+  p.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
   p.on("response", r => { if (r.status() >= 400) failedResponses.push({ status:r.status(), url:r.url() }); });
 }
 async function loaded() {

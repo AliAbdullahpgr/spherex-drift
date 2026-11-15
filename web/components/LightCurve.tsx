@@ -35,11 +35,11 @@ export default function LightCurve({ curves, kind, quickLook = false }: { curves
         {ticks.map((v) => (
           <g key={v}><line x1={L} x2={W - R} y1={Y(v)} y2={Y(v)} stroke={v === 100 ? "#5a574f" : "#1d1c19"} strokeDasharray={v === 100 ? "4 4" : undefined} /><text x={L - 7} y={Y(v) + 4} fill="#96928a" fontSize="11" textAnchor="end">{v}%</text></g>
         ))}
-        {dates.filter((_, i) => i % Math.max(1, Math.ceil(dates.length / 4)) === 0 || i === dates.length - 1).map((p) => <text key={p.pass} x={X(p.ms)} y={H - B + 15} fill="#96928a" fontSize="11" textAnchor={X(p.ms) < L + 30 ? "start" : X(p.ms) > W - R - 30 ? "end" : "middle"}>{month(p.ms)}</text>)}
+        {dates.filter((_, i) => i % Math.max(1, Math.ceil(dates.length / 4)) === 0 || i === dates.length - 1).map((p) => <text key={`${p.pass}-${p.ms}`} x={X(p.ms)} y={H - B + 15} fill="#96928a" fontSize="11" textAnchor={X(p.ms) < L + 30 ? "start" : X(p.ms) > W - R - 30 ? "end" : "middle"}>{month(p.ms)}</text>)}
         {usable.map((c) => (
           <g key={c.det} data-testid="lc-line">
             <polyline points={c.points.map((p) => `${X(p.ms)},${Y((p.v / c.points[0].v) * 100)}`).join(" ")} fill="none" stroke={BAND[(c.det - 1) % 6]} strokeWidth="1.6" strokeLinejoin="round" />
-            {c.points.map((p) => <circle key={p.pass} cx={X(p.ms)} cy={Y((p.v / c.points[0].v) * 100)} r="3" fill={BAND[(c.det - 1) % 6]} stroke="#000" strokeWidth=".8" />)}
+            {c.points.map((p) => <circle key={`${p.pass}-${p.ms}`} cx={X(p.ms)} cy={Y((p.v / c.points[0].v) * 100)} r="3" fill={BAND[(c.det - 1) % 6]} stroke="#000" strokeWidth=".8" />)}
           </g>
         ))}
       </svg>
@@ -53,7 +53,7 @@ export default function LightCurve({ curves, kind, quickLook = false }: { curves
         <div className="data-table" tabIndex={0} role="region" aria-label="Brightness over time measurements, scroll horizontally if needed">
           <table><caption>Brightness relative to the first pass in each wavelength band.</caption>
             <thead><tr><th scope="col">Wavelength (µm)</th><th scope="col">Date</th><th scope="col">Pass</th><th scope="col">Brightness (%)</th></tr></thead>
-            <tbody>{usable.flatMap((c) => c.points.map((p) => <tr key={`${c.det}-${p.pass}`}><td>{c.wl.toFixed(2)}</td><td>{month(p.ms)}</td><td>{p.pass}</td><td>{(p.v / c.points[0].v * 100).toFixed(1)}</td></tr>))}</tbody>
+            <tbody>{usable.flatMap((c) => c.points.map((p) => <tr key={`${c.det}-${p.pass}-${p.ms}`}><td>{c.wl.toFixed(2)}</td><td>{month(p.ms)}</td><td>{p.pass}</td><td>{(p.v / c.points[0].v * 100).toFixed(1)}</td></tr>))}</tbody>
           </table>
         </div>
       </details>

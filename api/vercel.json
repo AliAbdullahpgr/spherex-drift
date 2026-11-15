@@ -4,7 +4,7 @@
     "app/main.py": {
       "maxDuration": 800,
       "includeFiles": "prepared/**",
-      "excludeFiles": "{tests/**,scripts/**,.venv/**}"
+      "excludeFiles": "{tests/**,scripts/**,.venv/**,cache/**,.pytest_cache/**}"
     }
   }
 }
