@@ -5,6 +5,7 @@ COLLECTIONS (or set SPHEREX_COLLECTIONS="spherex_dr1,spherex_qr3,spherex_dr2").
 Nothing else in the code mentions a release name.
 """
 import os
+import tempfile
 from pathlib import Path
 
 API_ROOT = Path(__file__).resolve().parent.parent
@@ -21,7 +22,10 @@ S3_HTTP_BASE = "https://nasa-irsa-spherex.s3.amazonaws.com"
 USE_S3 = os.environ.get("SPHEREX_USE_S3", "1") != "0"  # False -> IRSA cutout service only
 
 # --- cache ------------------------------------------------------------------
-CACHE_DIR = Path(os.environ.get("SPHEREX_CACHE_DIR", API_ROOT / "cache"))
+# Deployed source is read-only on Vercel; only temporary storage is writable.
+_DEFAULT_CACHE_DIR = (Path(tempfile.gettempdir()) / "spherex-drift-cache"
+                      if os.environ.get("VERCEL") else API_ROOT / "cache")
+CACHE_DIR = Path(os.environ.get("SPHEREX_CACHE_DIR", _DEFAULT_CACHE_DIR))
 SIA_TTL_S = 12 * 3600          # how long a cached SIA result is trusted
 
 # --- concurrency ------------------------------------------------------------
