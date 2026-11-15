@@ -3,6 +3,7 @@
   "functions": {
     "app/main.py": {
       "maxDuration": 800,
+      "includeFiles": "prepared/**",
       "excludeFiles": "{tests/**,scripts/**,.venv/**}"
     }
   }
