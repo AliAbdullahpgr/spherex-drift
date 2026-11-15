@@ -86,7 +86,7 @@ b { font-weight: 600; }
 .pmark { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 1.5px solid var(--mark); border-radius: 50%; pointer-events: none; box-shadow: 0 0 0 1px #000a, inset 0 0 0 1px #000a; transition: left .25s, top .25s; }
 .pmark.a { border-color: #4da3ff; } .pmark.b { border-color: #ff9c2b; }
 .pmark span { position: absolute; top: -17px; left: 50%; transform: translateX(-50%); font-size: 10px; color: #fff; text-shadow: 0 0 3px #000; white-space: nowrap; }
-.busy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: 80%; background: #000d; border: 1px solid var(--line2); padding: 10px 14px; font-size: 12px; display: flex; gap: 10px; align-items: center; }
+.busy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: max-content; max-width: 80%; background: #000d; border: 1px solid var(--line2); padding: 10px 14px; font-size: 12px; display: flex; gap: 10px; align-items: center; pointer-events: none; }
 .spin { width: 12px; height: 12px; border: 1.5px solid var(--line2); border-top-color: var(--accent); border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; flex: none; vertical-align: -2px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loopflash { position: absolute; inset: 0; border: 1px solid var(--mark); pointer-events: none; opacity: 0; animation: loopflash .5s ease-out; }
