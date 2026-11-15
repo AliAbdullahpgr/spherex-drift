@@ -2,6 +2,7 @@
 // "Could you spot a Planet X?" Controls only: the parent keeps the value and does the hiding
 // (see hideObject in lib/planetx.ts).
 import { apparentMotion, type PlanetXValue } from "@/lib/planetx";
+import { useState } from "react";
 import css from "./MotionLab.module.css";
 
 export type { PlanetXValue };
@@ -24,6 +25,8 @@ const DIRS = ["north", "north-east", "east", "south-east", "south", "south-west"
 const compass = (east: number, north: number) => DIRS[((Math.round((Math.atan2(east, north) * 180) / Math.PI / 45) % 8) + 8) % 8];
 
 export default function PlanetXPanel({ value: v, onChange, epochsCount, spanYears, fovArcmin, inViewCount }: PlanetXPanelProps) {
+  const [eastDraft, setEastDraft] = useState(String(v.pmEast));
+  const [northDraft, setNorthDraft] = useState(String(v.pmNorth));
   const set = (p: Partial<PlanetXValue>) => onChange({ ...v, reveal: false, ...p });
   const m = apparentMotion(v.dist);
   const span = spanYears > 0 ? spanYears : 1;
@@ -52,9 +55,9 @@ export default function PlanetXPanel({ value: v, onChange, epochsCount, spanYear
           ) : (
             <div className={css.pair}>
               <label className="field">Moves east, arcseconds per year
-                <input className={css.num} type="number" step="0.1" value={v.pmEast} onChange={(e) => set({ pmEast: num(e.target.value) })} data-testid="px-pm-east" /></label>
+                <input className={css.num} type="number" min="-60" max="60" step="0.1" value={eastDraft} onChange={(e) => { setEastDraft(e.target.value); if (e.target.value !== "" && Number.isFinite(+e.target.value)) set({ pmEast: num(e.target.value) }); }} onBlur={(e) => { const value = num(e.target.value); setEastDraft(String(value)); set({ pmEast: value }); }} data-testid="px-pm-east" /></label>
               <label className="field">Moves north, arcseconds per year
-                <input className={css.num} type="number" step="0.1" value={v.pmNorth} onChange={(e) => set({ pmNorth: num(e.target.value) })} data-testid="px-pm-north" /></label>
+                <input className={css.num} type="number" min="-60" max="60" step="0.1" value={northDraft} onChange={(e) => { setNorthDraft(e.target.value); if (e.target.value !== "" && Number.isFinite(+e.target.value)) set({ pmNorth: num(e.target.value) }); }} onBlur={(e) => { const value = num(e.target.value); setNorthDraft(String(value)); set({ pmNorth: value }); }} data-testid="px-pm-north" /></label>
             </div>
           )}
           <label className="field">Brightness

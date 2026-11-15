@@ -16,6 +16,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
   const { ra, dec, fov } = view;
   const [state, setState] = useState<State>({ status: "loading" });
   const [loaded, setLoaded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [links, setLinks] = useState<SkyLink[]>(() => buildLinks(ra, dec));
 
   useEffect(() => {
@@ -30,7 +31,13 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
       });
     }, 250);
     return () => { live = false; clearTimeout(t); ctl.abort(); };
-  }, [ra, dec, fov]);
+  }, [ra, dec, fov, attempt]);
+
+  useEffect(() => {
+    if (state.status !== "ready" || loaded) return;
+    const timer = setTimeout(() => setState({ status: "none", note: "The survey picture did not load within 20 seconds. Try again." }), 20000);
+    return () => clearTimeout(timer);
+  }, [state, loaded]);
 
   useEffect(() => {
     let live = true;
@@ -58,7 +65,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
             <div className={styles.state} role="status"><span className="spin" /> Looking for a picture of this spot</div>
           )}
           {state.status === "none" && (
-            <div className={styles.state} data-testid="context-none">{state.note || "No other survey has a picture of this spot."}</div>
+            <div className={styles.state} data-testid="context-none">{state.note || "No other survey has a picture of this spot."}<button type="button" className="btn small" onClick={() => setAttempt((n) => n + 1)}>Retry survey picture</button></div>
           )}
         </div>
         <figcaption className={`${styles.cap} dim small`}>
@@ -76,7 +83,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
         {links.filter((l) => l.id !== "finderchart").map((l) => (
           <li key={l.id}>
             <a className="btn" href={l.url} target="_blank" rel="noopener noreferrer" data-testid={`link-${l.id}`}>
-              <span>{l.label}</span>{l.about && <span className="dim small">{l.about}</span>}
+              <span>{l.label}<span className="sr-only"> (opens in a new tab)</span></span>{l.about && <span className="dim small">{l.about}</span>}
             </a>
           </li>
         ))}

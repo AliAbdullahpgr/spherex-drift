@@ -31,13 +31,13 @@ export default function Filmstrip({ epochs, thumbs, marks, onSelect }: { epochs:
     const box = wrap.current;
     if (!el || !box) return;
     const l = el.offsetLeft, r = l + el.offsetWidth;
-    if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollTo({ left: l - box.clientWidth / 2 + el.offsetWidth / 2, behavior: "smooth" });
+    if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollTo({ left: l - box.clientWidth / 2 + el.offsetWidth / 2, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }, [active]);
   if (!epochs.length) return null;
   return (
     <div className="film" ref={wrap} data-testid="filmstrip" role="group" aria-label="Every date, oldest first">
       {epochs.map((e, i) => (
-        <button key={e.key} className={`cellfilm ${e.survey} ${marks[i]}`} onClick={() => onSelect(i)} title={`${e.label} · ${fmtDate(e.ms)} · ${e.wl.toFixed(2)} µm`} aria-label={`${e.label}, ${fmtDate(e.ms)}`}>
+        <button key={e.key} className={`cellfilm ${e.survey} ${marks[i]}`} aria-pressed={marks[i] !== "none"} onClick={() => onSelect(i)} title={`${e.label} · ${fmtDate(e.ms)} · ${e.wl.toFixed(2)} µm`} aria-label={`${e.label}, ${fmtDate(e.ms)}`}>
           <Thumb image={thumbs[i]} />
           <span className="when">{fmtDate(e.ms).slice(0, 7)}</span>
           {(marks[i] === "a" || marks[i] === "b") && <span className="ab">{marks[i].toUpperCase()}</span>}

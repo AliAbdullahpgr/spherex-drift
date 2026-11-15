@@ -1,8 +1,9 @@
 // The ONLY module that talks to the backend (or the mock). See CONTRACT.md.
 import type { Frame, FramesResponse, Img, SpectrumResponse, Target, View } from "./types";
+import { EXAMPLE_TARGETS } from "./targets";
 import { MOCK_TARGETS, mockFrameImage, mockFrames, mockSpectrum, mockStack, mockWise } from "./mock";
 
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "/api").replace(/\/$/, "");
 export const IMG_SIZE = 256;
 
 let mockMode = false;
@@ -28,14 +29,28 @@ export async function detectBackend(forceMock: boolean): Promise<{ mock: boolean
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(API_URL + path, { signal });
-  if (!r.ok) {
-    let d = "";
-    try { d = (await r.json()).detail; } catch {}
-    throw new Error(`${r.status} ${d || r.statusText}`);
-  }
-  return r.json();
+async function request<T>(signal: AbortSignal | undefined, timeoutMs: number, message: string, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try { return await run(controller.signal); }
+  catch (error) { if (timedOut) throw new Error(message); throw error; }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
+}
+
+async function getJSON<T>(path: string, signal?: AbortSignal, timeoutMs = 60000, message = "The archive did not respond within 60 seconds. Try again."): Promise<T> {
+  return request(signal, timeoutMs, message, async (signal) => {
+    const r = await fetch(API_URL + path, { signal });
+    if (!r.ok) {
+      let d = "";
+      try { d = (await r.json()).detail; } catch {}
+      throw new Error(`${r.status} ${d || r.statusText}`);
+    }
+    return await r.json();
+  });
 }
 
 /** Parse float32 little-endian payload. Header X-Shape "h,w" preferred; tolerates a real .npy header. */
@@ -65,20 +80,22 @@ export function parseNpy(buf: ArrayBuffer, shapeHeader?: string | null): Img {
 }
 
 async function getNpy(path: string, signal?: AbortSignal): Promise<Img> {
-  const r = await fetch(API_URL + path, { signal });
-  if (!r.ok) {
-    let d = "";
-    try { d = (await r.json()).detail; } catch {}
-    throw new Error(`${r.status} ${d || r.statusText}`);
-  }
-  return parseNpy(await r.arrayBuffer(), r.headers.get("X-Shape"));
+  return request(signal, 60000, "The image took longer than 60 seconds. Retry the failed images.", async (signal) => {
+    const r = await fetch(API_URL + path, { signal });
+    if (!r.ok) {
+      let d = "";
+      try { d = (await r.json()).detail; } catch {}
+      throw new Error(`${r.status} ${d || r.statusText}`);
+    }
+    return parseNpy(await r.arrayBuffer(), r.headers.get("X-Shape"));
+  });
 }
 
 const q = (o: Record<string, string | number>) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
 
 export async function getTargets(): Promise<Target[]> {
   if (mockMode) return MOCK_TARGETS;
-  try { return await getJSON<Target[]>("/targets"); } catch { return MOCK_TARGETS; }
+  try { return await getJSON<Target[]>("/targets"); } catch { return EXAMPLE_TARGETS; }
 }
 
 /**
@@ -91,12 +108,14 @@ export async function getFrames(v: View, signal?: AbortSignal, quick = false): P
 }
 
 /** Look up an object name (any star, galaxy, nebula) with the backend's name service. */
-export async function resolveName(name: string): Promise<{ name: string; ra: number; dec: number } | null> {
+export async function resolveName(name: string, signal?: AbortSignal): Promise<{ name: string; ra: number; dec: number } | null> {
   if (mockMode) return null;
-  const r = await fetch(`${API_URL}/resolve?${q({ name })}`);
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error("The name lookup service is not answering. Enter RA and Dec instead.");
-  return r.json();
+  return request(signal, 15000, "Name lookup timed out. Enter RA and Dec, or try again.", async (signal) => {
+    const r = await fetch(`${API_URL}/resolve?${q({ name })}`, { signal });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error("The name lookup service is not answering. Enter RA and Dec instead.");
+    return await r.json();
+  });
 }
 
 export async function getWiseFrames(v: View, signal?: AbortSignal): Promise<FramesResponse> {
@@ -107,7 +126,7 @@ export async function getWiseFrames(v: View, signal?: AbortSignal): Promise<Fram
 /** Single exposure (SPHEREx or WISE). Uses the frame's own image_url so the backend controls routing. */
 export async function getFrameImage(f: Frame, v: View, signal?: AbortSignal): Promise<Img> {
   if (mockMode) { await delay(120 + Math.random() * 200); return mockFrameImage(f.id, v.ra, v.dec, v.fov, IMG_SIZE); }
-  const u = new URL(f.image_url, API_URL + "/");
+  const u = new URL(f.image_url, "http://localhost/");
   u.searchParams.set("ra", String(v.ra)); u.searchParams.set("dec", String(v.dec)); u.searchParams.set("fov", String(v.fov));
   u.searchParams.set("size", String(IMG_SIZE)); u.searchParams.set("format", "npy");
   return getNpy(u.pathname + u.search, signal);
@@ -121,5 +140,6 @@ export async function getStack(v: View, pass: number, detector: number, signal?:
 export async function getSpectrum(ra: number, dec: number, center: View, radiusArcsec = 6, signal?: AbortSignal): Promise<SpectrumResponse> {
   if (mockMode) { await delay(300); return mockSpectrum(ra, dec, radiusArcsec, center, center.fov); }
   // cra/cdec = centre of the field on screen: lets the backend reuse pixels it already has (fast).
-  return getJSON(`/spectrum?${q({ ra, dec, radius_arcsec: radiusArcsec, cra: center.ra, cdec: center.dec })}`, signal);
+  return getJSON(`/spectrum?${q({ ra, dec, radius_arcsec: radiusArcsec, cra: center.ra, cdec: center.dec })}`, signal, 30000,
+    "The archive took longer than 30 seconds. Try again, or choose a spot closer to the centre.");
 }

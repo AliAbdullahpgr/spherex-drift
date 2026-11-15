@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { fmtDec, fmtRA, pix2sky } from "@/lib/coords";
 
 type Props = {
@@ -39,6 +39,9 @@ const FOV_MIN = 1, FOV_MAX = 30;
 const DRAG_PX = 5; // a press that moves less than this is a click
 
 export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, picked, onHover, onPick, caption, marks = [], path = [], hud, sharp = false, invert = false, loopTick = 0, onRecentre, onZoom, loading = false, children }: Props) {
+  const [touchPan, setTouchPan] = useState(false);
+  const helpId = useId();
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   const frame = useRef<HTMLDivElement>(null);
   // gesture state lives in refs: the picture follows the pointer without re-rendering React
@@ -115,6 +118,7 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
   }, []);
 
   const down = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === "touch" && !touchPan) return;
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const s = g.current;
     dropStale();
@@ -171,6 +175,25 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
       onRecentre(at.ra, at.dec);
     } else s.clickT = setTimeout(() => onPick(at), e.detail === 1 ? 240 : 0); // wait to see if a second click follows
   };
+  const keyboard = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const deltas: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    const delta = deltas[event.key];
+    if (!delta && !["Enter", "Home", "+", "=", "-"].includes(event.key)) return;
+    event.preventDefault(); event.stopPropagation();
+    if (event.key === "+" || event.key === "=" || event.key === "-") { commitZoom(fov + (event.key === "-" ? 0.5 : -0.5)); return; }
+    if (delta && event.shiftKey) {
+      const centre = (w - 1) / 2;
+      const sky = pix2sky(centre + delta[0] * 16, centre + delta[1] * 16, w, scale, ra, dec);
+      onRecentre?.(sky.ra, sky.dec); return;
+    }
+    const previous = cursor ?? { x: Math.floor(w / 2), y: Math.floor(w / 2) };
+    const next = event.key === "Home" ? { x: Math.floor(w / 2), y: Math.floor(w / 2) }
+      : { x: Math.min(w - 1, Math.max(0, previous.x + (delta?.[0] ?? 0))), y: Math.min(w - 1, Math.max(0, previous.y + (delta?.[1] ?? 0))) };
+    setCursor(next);
+    const sky = pix2sky(next.x, next.y, w, scale, ra, dec);
+    onHover({ ...next, ...sky });
+    if (event.key === "Enter" && image) onPick({ ...next, ...sky });
+  };
 
   const bar = [...NICE].reverse().find((n) => n <= fov * 0.35) ?? NICE[0];
   const barPct = (bar / fov) * 100;
@@ -180,19 +203,22 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
     <div className="viewer" data-testid="viewer">
       <div className={`frame ${invert ? "inv" : ""}`} ref={frame}>
         <canvas
-          ref={cv} width={size} height={size} data-testid="viewer-canvas" aria-label={caption || "Sky image"} className={sharp ? "sharp" : undefined}
+          ref={cv} width={size} height={size} data-testid="viewer-canvas" role="group" tabIndex={0} aria-label="Interactive sky image" aria-describedby={helpId} className={sharp ? "sharp" : undefined}
+          style={{ touchAction: touchPan ? "none" : "pan-y pinch-zoom" }}
+          onKeyDown={keyboard} onFocus={() => setCursor({ x: Math.floor(w / 2), y: Math.floor(w / 2) })} onBlur={() => setCursor(null)}
           onPointerDown={down} onPointerMove={move} onPointerUp={(e) => up(e)} onPointerCancel={(e) => up(e, true)}
           onPointerLeave={() => onHover(null)}
           onClick={click}
         />
         <svg className="overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
           {crosshair && (
-            <g className="cross" strokeWidth="0.35" vectorEffect="non-scaling-stroke">
+            <g className="cross" strokeWidth="0.35" vectorEffect="non-scaling-stroke" data-testid="crosshair">
               <line x1="50" y1="38" x2="50" y2="46" vectorEffect="non-scaling-stroke" /><line x1="50" y1="54" x2="50" y2="62" vectorEffect="non-scaling-stroke" />
               <line x1="38" y1="50" x2="46" y2="50" vectorEffect="non-scaling-stroke" /><line x1="54" y1="50" x2="62" y2="50" vectorEffect="non-scaling-stroke" />
             </g>
           )}
           {picked && <circle className="onsky" cx={((picked.x + 0.5) / w) * 100} cy={((picked.y + 0.5) / w) * 100} r="2.4" fill="none" stroke="#ffd166" strokeWidth="1.5" vectorEffect="non-scaling-stroke" data-testid="pick-ring" />}
+          {cursor && <circle cx={((cursor.x + 0.5) / w) * 100} cy={((cursor.y + 0.5) / w) * 100} r="2" fill="none" stroke={invert ? "#000" : "#fff"} strokeDasharray="3 2" vectorEffect="non-scaling-stroke" data-testid="keyboard-cursor" />}
           {path.length > 1 && (
             <polyline className="onsky" points={path.map((q) => `${q.x * 100},${q.y * 100}`).join(" ")} fill="none" stroke="#ffd166" strokeOpacity=".75" strokeWidth="1.2" strokeDasharray="4 4" vectorEffect="non-scaling-stroke" data-testid="pm-path" />
           )}
@@ -216,6 +242,11 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
         {(hud?.big || hud?.small) && <div className="hud info">{hud.big && <b>{hud.big}</b>}{hud.small && <span>{hud.small}</span>}</div>}
         {busy && <div className="busy" role="status" data-testid="busy"><i className="spin" />{busy}</div>}
       </div>
+      <button type="button" className="btn touch-nav" aria-pressed={touchPan} data-testid="touch-pan" onClick={() => setTouchPan((v) => !v)}>
+        {touchPan ? "Done moving sky · scroll page" : "Move sky by touch"}
+      </button>
+      <p id={helpId} className="sr-only">{caption}. Arrow keys move the selection; Enter measures its spectrum. Home selects the centre. Shift and arrow keys pan the sky. Plus and minus zoom. Space plays or pauses.</p>
+      <p className="sr-only" role="status">{cursor ? `Selected ${fmtRA(pix2sky(cursor.x, cursor.y, w, scale, ra, dec).ra)} ${fmtDec(pix2sky(cursor.x, cursor.y, w, scale, ra, dec).dec)}` : ""}</p>
     </div>
   );
 }

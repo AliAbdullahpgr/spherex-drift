@@ -47,6 +47,15 @@ export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "f
         {usable.map((c) => <span key={c.det}><i className="dot" style={{ background: BAND[(c.det - 1) % 6] }} />{c.wl.toFixed(1)} µm</span>)}
       </div>
       <p className="dim small">Each line is one wavelength band, with its first pass set to 100%.{kind === "halo" ? " This star saturates the detector, so brightness is measured from its outer halo." : ""}</p>
+      <details className="measurement-data" data-testid="lightcurve-data">
+        <summary>View brightness measurements as a table</summary>
+        <div className="data-table" tabIndex={0} role="region" aria-label="Brightness over time measurements, scroll horizontally if needed">
+          <table><caption>Brightness relative to the first pass in each wavelength band.</caption>
+            <thead><tr><th scope="col">Wavelength (µm)</th><th scope="col">Date</th><th scope="col">Pass</th><th scope="col">Brightness (%)</th></tr></thead>
+            <tbody>{usable.flatMap((c) => c.points.map((p) => <tr key={`${c.det}-${p.pass}`}><td>{c.wl.toFixed(2)}</td><td>{month(p.ms)}</td><td>{p.pass}</td><td>{(p.v / c.points[0].v * 100).toFixed(1)}</td></tr>))}</tbody>
+          </table>
+        </div>
+      </details>
     </figure>
   );
 }

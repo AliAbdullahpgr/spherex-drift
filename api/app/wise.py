@@ -276,6 +276,7 @@ async def wise_image(frame_id: str, ra: float, dec: float, fov: float = 5.0,
     if format == "npy":
         raw = np.ascontiguousarray(arr.astype("<f4")).tobytes()
         return Response(raw, media_type="application/octet-stream",
-                        headers={"X-Shape": f"{arr.shape[0]},{arr.shape[1]}"})
+                        headers={"X-Shape": f"{arr.shape[0]},{arr.shape[1]}",
+                                 "Cache-Control": "public, max-age=3600"})
     png = await asyncio.to_thread(G.to_png, arr, stretch)
-    return Response(png, media_type="image/png")
+    return Response(png, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})

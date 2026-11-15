@@ -50,6 +50,15 @@ export default function Spectrum({ picked, title }: { picked: Picked; title: str
         
       </div>
       <p className="dim small">One point per exposure. Where the colours separate, the brightness changed between passes.{picked.kind === "halo" ? " This star saturates the detector, so its outer halo is measured." : ""}</p>
+      <details className="measurement-data" data-testid="spectrum-data">
+        <summary>View spectrum measurements as a table</summary>
+        <div className="data-table" tabIndex={0} role="region" aria-label="Spectrum measurements, scroll horizontally if needed">
+          <table><caption>{title}. Brightness in MJy/sr.</caption>
+            <thead><tr><th scope="col">Pass</th><th scope="col">Wavelength (µm)</th><th scope="col">Brightness</th><th scope="col">Uncertainty</th></tr></thead>
+            <tbody>{pts.map((p, i) => <tr key={i}><td>{p.pass}</td><td>{p.wavelength_um.toFixed(3)}</td><td>{p.flux_mjy_sr.toPrecision(5)}</td><td>{p.err == null || p.err <= 0 ? "Unavailable" : p.err.toPrecision(3)}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </details>
     </figure>
   );
 }

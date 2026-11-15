@@ -1,0 +1,308 @@
+[
+  {
+    "name": "Display modes: blink, rainbow, each-date difference and two-date difference",
+    "status": "passed",
+    "ms": 1713,
+    "detail": "All four modes render nonblank pixels."
+  },
+  {
+    "name": "Brightness: all stretch types, black/white points, reset",
+    "status": "passed",
+    "ms": 2457,
+    "detail": "764931, 8630664, 2975406"
+  },
+  {
+    "name": "Playback speed, crosshair and expected-position controls",
+    "status": "passed",
+    "ms": 1328,
+    "detail": ""
+  },
+  {
+    "name": "Quality flags: readable explanations available by keyboard",
+    "status": "passed",
+    "ms": 965,
+    "detail": ""
+  },
+  {
+    "name": "Field of view: 1–30 arcminute range",
+    "status": "passed",
+    "ms": 3011,
+    "detail": ""
+  },
+  {
+    "name": "Individual exposures, detector selection and restoring combined passes",
+    "status": "passed",
+    "ms": 1406,
+    "detail": ""
+  },
+  {
+    "name": "Exposure grid: keyboard selection and Shift+arrow range selection",
+    "status": "passed",
+    "ms": 989,
+    "detail": ""
+  },
+  {
+    "name": "Tabs: keyboard roving focus, Arrow keys, Home and End",
+    "status": "passed",
+    "ms": 366,
+    "detail": ""
+  },
+  {
+    "name": "Sky image: keyboard spectrum selection, panning and zoom",
+    "status": "passed",
+    "ms": 1979,
+    "detail": ""
+  },
+  {
+    "name": "Pass selection after a restricted range opens the requested pass",
+    "status": "passed",
+    "ms": 1266,
+    "detail": ""
+  },
+  {
+    "name": "Filmstrip and timeline date selection",
+    "status": "passed",
+    "ms": 708,
+    "detail": ""
+  },
+  {
+    "name": "Planet simulation: distance, brightness, reveal, reseed and custom motion",
+    "status": "passed",
+    "ms": 4029,
+    "detail": ""
+  },
+  {
+    "name": "Mover finder: results, Show/Hide overlays, catalogue stacking",
+    "status": "passed",
+    "ms": 848,
+    "detail": ""
+  },
+  {
+    "name": "Simulation changes invalidate earlier mover and stack results",
+    "status": "passed",
+    "ms": 713,
+    "detail": ""
+  },
+  {
+    "name": "Finder evaluation: injection/recovery statistics and cancellation",
+    "status": "passed",
+    "ms": 3859,
+    "detail": "Found 8 of 10 bright, 7 of 10 medium, and 8 of 10 faint simulated movers; 1 candidate in the untouched pictures.\n\nEach simulated mover was hidden in these same pictures at a random place, moving between 0.66″ and 9.5″ per year. Bright means 30 times the noise at its peak, medium 12, faint 6. It counts as found only if the finder reports the right speed and direction to within 15 percent. Candidates in the untouched pictures are false alarms unless something there really does move. The finder also reported 10 wrong candidates during the test."
+  },
+  {
+    "name": "Motion search at a picked spot, motion inputs and survey selector",
+    "status": "passed",
+    "ms": 1254,
+    "detail": ""
+  },
+  {
+    "name": "Catalogue overlays: Gaia rings and motion arrows",
+    "status": "passed",
+    "ms": 494,
+    "detail": ""
+  },
+  {
+    "name": "Asteroid labels: individual exposures, labels and text results",
+    "status": "passed",
+    "ms": 1167,
+    "detail": ""
+  },
+  {
+    "name": "Variable-star brightness curve and accessible measurement tables",
+    "status": "passed",
+    "ms": 1236,
+    "detail": "24 curve measurements, 143 spectrum measurements"
+  },
+  {
+    "name": "Accessibility scan: charts and expanded data tables",
+    "status": "passed",
+    "ms": 1357,
+    "detail": "No automated WCAG 2.1 AA violations; manual review candidates saved separately."
+  },
+  {
+    "name": "External reference links: coordinate parameters and new-tab announcements",
+    "status": "passed",
+    "ms": 32,
+    "detail": "SIMBAD, VizieR, Legacy Survey and WiseView links checked; external sites were not treated as app-controlled pages."
+  },
+  {
+    "name": "Share URL and embed: settings round-trip and accessible heading",
+    "status": "passed",
+    "ms": 4068,
+    "detail": ""
+  },
+  {
+    "name": "Same-origin API: frontend port alone supplies real data",
+    "status": "passed",
+    "ms": 564,
+    "detail": "No browser dependency on localhost:8000; one forwarded frontend port is sufficient."
+  },
+  {
+    "name": "Real target: Barnard's Star",
+    "status": "passed",
+    "ms": 5758,
+    "detail": "26 of 26 images loaded"
+  },
+  {
+    "name": "Real target: Epsilon Indi B",
+    "status": "passed",
+    "ms": 6971,
+    "detail": "27 of 27 images loaded"
+  },
+  {
+    "name": "Real target: WISE 0855",
+    "status": "passed",
+    "ms": 2637,
+    "detail": "26 of 26 images loaded"
+  },
+  {
+    "name": "Real target: RW Aurigae",
+    "status": "passed",
+    "ms": 5281,
+    "detail": "3 of 3 images loaded"
+  },
+  {
+    "name": "Real target: R Draconis",
+    "status": "passed",
+    "ms": 6214,
+    "detail": "3 of 3 images loaded"
+  },
+  {
+    "name": "Real data: every detector/wavelength channel",
+    "status": "passed",
+    "ms": 5700,
+    "detail": "All six detector bands loaded and rendered."
+  },
+  {
+    "name": "Real individual exposure mode and quality flags",
+    "status": "passed",
+    "ms": 3613,
+    "detail": "45 real exposures rendered without failed images."
+  },
+  {
+    "name": "Real Gaia: Barnard motion arrow and refresh on target change",
+    "status": "passed",
+    "ms": 3084,
+    "detail": "70 Gaia rings in the new field."
+  },
+  {
+    "name": "Real context image: successful decoding and survey attribution",
+    "status": "passed",
+    "ms": 97,
+    "detail": ""
+  },
+  {
+    "name": "Real object-name resolution",
+    "status": "passed",
+    "ms": 1443,
+    "detail": "Vega resolved through the live name service."
+  },
+  {
+    "name": "Real known-object service: Ceres at independently supplied test position/date",
+    "status": "passed",
+    "ms": 607,
+    "detail": "11 positions returned, including Ceres. Browser label placement is tested separately against deterministic dates."
+  },
+  {
+    "name": "Catalogue outage: distinguish failure from empty field; Retry recovers",
+    "status": "passed",
+    "ms": 565,
+    "detail": ""
+  },
+  {
+    "name": "Asteroid outage: backend notes and Retry remain visible",
+    "status": "passed",
+    "ms": 2268,
+    "detail": ""
+  },
+  {
+    "name": "Superseded name lookup cannot overwrite a quick-picked target",
+    "status": "passed",
+    "ms": 3512,
+    "detail": ""
+  },
+  {
+    "name": "Exposure-list failure: visible error and successful Retry",
+    "status": "passed",
+    "ms": 12251,
+    "detail": ""
+  },
+  {
+    "name": "Image failure: missing-frame reporting and Retry",
+    "status": "passed",
+    "ms": 2318,
+    "detail": ""
+  },
+  {
+    "name": "No-coverage field: honest empty state, no permanent spectrum spinner",
+    "status": "passed",
+    "ms": 526,
+    "detail": ""
+  },
+  {
+    "name": "Invalid coordinates: accessible validation and no view change",
+    "status": "passed",
+    "ms": 325,
+    "detail": ""
+  },
+  {
+    "name": "Accessibility: desktop",
+    "status": "passed",
+    "ms": 934,
+    "detail": "No automated WCAG 2.1 AA violations; manual review candidates saved separately."
+  },
+  {
+    "name": "Layout reflow: desktop",
+    "status": "passed",
+    "ms": 439,
+    "detail": ""
+  },
+  {
+    "name": "Accessibility: phone",
+    "status": "passed",
+    "ms": 918,
+    "detail": "No automated WCAG 2.1 AA violations; manual review candidates saved separately."
+  },
+  {
+    "name": "Layout reflow: phone",
+    "status": "passed",
+    "ms": 184,
+    "detail": ""
+  },
+  {
+    "name": "Accessibility: narrow-zoom-equivalent",
+    "status": "passed",
+    "ms": 843,
+    "detail": "No automated WCAG 2.1 AA violations; manual review candidates saved separately."
+  },
+  {
+    "name": "Layout reflow: narrow-zoom-equivalent",
+    "status": "passed",
+    "ms": 186,
+    "detail": ""
+  },
+  {
+    "name": "Malformed shared links cannot request invalid detectors or empty pass ranges",
+    "status": "passed",
+    "ms": 2237,
+    "detail": ""
+  },
+  {
+    "name": "Reduced motion: autoplay off by default, explicit Play still works",
+    "status": "passed",
+    "ms": 2678,
+    "detail": ""
+  },
+  {
+    "name": "Keyboard skip link focuses the main sky viewer",
+    "status": "passed",
+    "ms": 2922,
+    "detail": ""
+  },
+  {
+    "name": "Backend offline: labelled demo and reconnect to real data",
+    "status": "passed",
+    "ms": 4360,
+    "detail": ""
+  }
+]

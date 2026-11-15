@@ -6,7 +6,8 @@ import { animFrames, buildEpochs, defaultDetector, detectorInfo, fmtDate, flagHe
 import { combine, difference, levels, minusRest, normalise, paintDiff, rainbow, sharedLevels, toGray, type DiffField, type Norm } from "@/lib/render";
 import { lightCurve, pickMeasure } from "@/lib/photometry";
 import { centroid, fitMotion, msToYear, type Sample } from "@/lib/motion";
-import { apparentMotion, injectPlanetX } from "@/lib/planetx";
+import { hideObject, PLANETX_DEFAULT, type PlanetXValue } from "@/lib/planetx";
+import PlanetXPanel from "./PlanetXPanel";
 import { DEFAULTS, readState, writeState, type AppState, type Mode } from "@/lib/urlstate";
 import type { Frame, SpectrumPoint, Target } from "@/lib/types";
 import Viewer, { Readout } from "./Viewer";
@@ -19,7 +20,7 @@ import LightCurve from "./LightCurve";
 import MotionLab from "./MotionLab";
 import SkyOverlay from "./SkyOverlay";
 import ContextPanel from "./ContextPanel";
-import { getGaia, getKnownObjects } from "@/lib/overlays";
+import { getGaia, getKnownObjects, lookupGaia, lookupKnownObjects, pickKnownTimes } from "@/lib/overlays";
 
 const SIZE = api.IMG_SIZE;
 type Hover = { x: number; y: number; ra: number; dec: number } | null;
@@ -29,8 +30,17 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [backend, setBackend] = useState<{ mock: boolean; reason?: string } | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
+  const [targetInfoOpen, setTargetInfoOpen] = useState(true);
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 860px)");
+    const sync = () => setTargetInfoOpen(!media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
   const [spx, setSpx] = useState<Frame[]>([]);
   const [wise, setWise] = useState<Frame[]>([]);
+  const [listedView, setListedView] = useState("");
   const [framesState, setFramesState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [framesErr, setFramesErr] = useState("");
   const [wiseNote, setWiseNote] = useState("");
@@ -44,17 +54,34 @@ export default function App() {
   const [hover, setHover] = useState<Hover>(null);
   const [picked, setPicked] = useState<{ x: number; y: number; ra: number; dec: number } | null>(null);
   const [spec, setSpec] = useState<{ state: "idle" | "loading" | "done" | "error"; points: SpectrumPoint[]; err?: string }>({ state: "idle", points: [] });
+  const spectrumRequest = useRef<AbortController | null>(null);
+  const [specSeconds, setSpecSeconds] = useState(0);
+  const imageRequests = useRef({ controller: new AbortController(), pending: new Map<string, Promise<Norm>>() });
+
+  useEffect(() => {
+    if (spec.state !== "loading") return;
+    setSpecSeconds(0);
+    const timer = setInterval(() => setSpecSeconds((seconds) => seconds + 1), 1000);
+    return () => clearInterval(timer);
+  }, [spec.state]);
 
   const [listing, setListing] = useState<"quick" | "full" | "done">("done"); // how complete the exposure list is
   const [autoDet, setAutoDet] = useState<number | null>(null);
   const [centre, setCentre] = useState<{ state: "idle" | "loading" | "done" | "error"; points: SpectrumPoint[] }>({ state: "idle", points: [] });
-  const [px, setPx] = useState<{ on: boolean; dist: number; snr: number; seed: number; reveal: boolean }>({ on: false, dist: 5000, snr: 12, seed: 1, reveal: false });
+  const [px, setPx] = useState<PlanetXValue>(PLANETX_DEFAULT);
   const [resolving, setResolving] = useState(false);
+  const nameRequest = useRef<AbortController | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
   const nowPos = useRef<{ ra: number; dec: number } | null>(null);
   const [ov, setOv] = useState({ gaia: false, motion: false, known: false });
   const [gaia, setGaia] = useState<Awaited<ReturnType<typeof getGaia>>>([]);
   const [known, setKnown] = useState<Awaited<ReturnType<typeof getKnownObjects>>>([]);
-  const [ovBusy, setOvBusy] = useState("");
+  const [gaiaStatus, setGaiaStatus] = useState({ loading: false, error: false, text: "" });
+  const [knownStatus, setKnownStatus] = useState({ loading: false, error: false, text: "" });
+  const [gaiaRetry, retryGaia] = useState(0);
+  const [knownRetry, retryKnown] = useState(0);
+  const [reload, setReload] = useState(0);
+  const [imageAttempt, setImageAttempt] = useState(0);
   const [lab, setLab] = useState<{ marks: { x: number; y: number; label?: string }[]; path: { x: number; y: number }[] }>({ marks: [], path: [] });
 
   const set = useCallback((p: Partial<AppState>) => setS((o) => ({ ...o, ...p })), []);
@@ -65,6 +92,7 @@ export default function App() {
     const q = new URLSearchParams(window.location.search);
     // A bare link opens on the clearest view we have: WISE 0855 blinking through 16 years of WISE and SPHEREx.
     if (!q.has("ra") && !q.has("mode")) { st.mode = "blink"; st.wise = true; }
+    if (!q.has("play") && window.matchMedia("(prefers-reduced-motion: reduce)").matches) st.play = false;
     setS(st); setPlaying(st.play);
     setInput(`${st.ra.toFixed(5)} ${st.dec.toFixed(5)}`);
     api.detectBackend(st.mock).then((b) => {
@@ -87,8 +115,15 @@ export default function App() {
   const viewKey = `${s.ra.toFixed(5)}|${s.dec.toFixed(5)}|${s.fov}`;
   const view = useMemo(() => ({ ra: s.ra, dec: s.dec, fov: s.fov }), [s.ra, s.dec, s.fov]);
   useEffect(() => {
+    const requests = { controller: new AbortController(), pending: new Map<string, Promise<Norm>>() };
+    imageRequests.current = requests;
+    cache.current.clear();
+    return () => { requests.controller.abort(); spectrumRequest.current?.abort(); nameRequest.current?.abort(); };
+  }, [viewKey, reload]);
+  useEffect(() => {
     if (!ready) return;
     const ctl = new AbortController();
+    setListedView(viewKey);
     setFramesState("loading"); setFramesErr(""); setWiseNote(""); setPicked(null); setSpec({ state: "idle", points: [] });
     setCentre({ state: "idle", points: [] }); setAutoDet(null); setListing("quick");
     setSpx([]); setWise([]); // never show or request the previous position's exposures against the new one
@@ -122,51 +157,63 @@ export default function App() {
     })();
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, viewKey]);
+  }, [ready, viewKey, reload]);
 
   const detInfo = useMemo(() => detectorInfo(spx), [spx]);
   const det = s.det ?? autoDet ?? defaultDetector(spx);
   const allPasses = useMemo(() => [...new Set(spx.map((f) => f.pass))].sort((a, b) => a - b), [spx]);
-  const passFrom = Math.max(s.pf ?? allPasses[0] ?? 1, allPasses[0] ?? 1);
-  const passTo = Math.min(s.pt ?? allPasses[allPasses.length - 1] ?? 1, allPasses[allPasses.length - 1] ?? 1);
+  const passFrom = Math.min(allPasses[allPasses.length - 1] ?? 1, Math.max(s.pf ?? allPasses[0] ?? 1, allPasses[0] ?? 1));
+  const passTo = Math.max(passFrom, Math.min(s.pt ?? allPasses[allPasses.length - 1] ?? 1, allPasses[allPasses.length - 1] ?? 1));
   const epochs = useMemo(() => buildEpochs(spx, wise, { src: s.src, detector: det, includeWise: s.wise, passFrom, passTo }), [spx, wise, s.src, det, s.wise, passFrom, passTo]);
 
   // ---- progressive image loading (current epoch first)
   const imgKey = (e: Epoch) => `${viewKey}|${e.key}`;
   const frameIdx = Math.min(s.frame, Math.max(0, epochs.length - 1));
   useEffect(() => {
-    if (!ready || framesState !== "done" || !epochs.length) { setProg({ done: 0, total: 0, current: "", failed: 0, lastErr: "" }); return; }
-    const ctl = new AbortController();
+    if (!ready || listedView !== viewKey || !epochs.length) { setProg({ done: 0, total: 0, current: "", failed: 0, lastErr: "" }); return; }
+    const requests = imageRequests.current;
+    const signal = requests.controller.signal;
+    let active = true;
     const order = [...epochs.keys()].sort((i, j) => (i === frameIdx ? -1 : j === frameIdx ? 1 : i - j));
     const todo = order.map((i) => epochs[i]).filter((e) => !cache.current.has(imgKey(e)));
     let done = epochs.length - todo.length, failed = 0, lastErr = "";
     setProg({ done, total: epochs.length, current: "", failed, lastErr });
     let next = 0;
     const worker = async () => {
-      while (!ctl.signal.aborted) {
+      while (active && !signal.aborted) {
         const e = todo[next++];
         if (!e) return;
         setProg((p) => ({ ...p, current: describe(e) }));
         try {
-          const img = e.kind === "stack" ? await api.getStack(view, e.pass, e.detector!, ctl.signal) : await api.getFrameImage(e.frame!, view, ctl.signal);
-          if (ctl.signal.aborted) return;
-          cache.current.set(imgKey(e), normalise(img));
+          const key = imgKey(e);
+          let request = requests.pending.get(key);
+          if (!request) {
+            request = (e.kind === "stack" ? api.getStack(view, e.pass, e.detector!, signal) : api.getFrameImage(e.frame!, view, signal))
+              .then((img) => {
+                const norm = normalise(img);
+                if (!signal.aborted) { cache.current.set(key, norm); setVer((v) => v + 1); }
+                return norm;
+              });
+            requests.pending.set(key, request);
+          }
+          try { await request; } finally { if (requests.pending.get(key) === request) requests.pending.delete(key); }
+          if (!active || signal.aborted) return;
           done++;
-          setVer((v) => v + 1);
         } catch (err: any) {
-          if (ctl.signal.aborted) return;
+          if (!active || signal.aborted) return;
           failed++; lastErr = err?.message ?? String(err);
         }
         setProg({ done, total: epochs.length, current: next < todo.length ? describe(todo[next] ?? e) : "", failed, lastErr });
       }
     };
-    Promise.all([worker(), worker(), worker()]);
-    return () => ctl.abort();
+    void Promise.all(Array.from({ length: 6 }, worker));
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, framesState, epochs, viewKey]);
+  }, [ready, framesState, epochs, viewKey, listedView, imageAttempt]);
 
   const rawNorms = useMemo(() => epochs.map((e) => cache.current.get(imgKey(e)) ?? null), [epochs, ver, viewKey]); // eslint-disable-line
-  const planet = useMemo(() => (px.on && epochs.length ? injectPlanetX(rawNorms, epochs.map((e) => e.ms), { distAU: px.dist, snr: px.snr, seed: px.seed, fovArcmin: s.fov }) : null), [px.on, px.dist, px.snr, px.seed, rawNorms, epochs, s.fov]);
+  const planet = useMemo(() => hideObject(rawNorms, epochs.map((e) => e.ms), px, s.fov),
+    [px.on, px.kind, px.dist, px.snr, px.seed, px.pmEast, px.pmNorth, rawNorms, epochs, s.fov]); // eslint-disable-line react-hooks/exhaustive-deps
   const norms = planet ? planet.norms : rawNorms;
   // blink uses one brightness scale per survey so real changes in brightness stay visible
   const shared = useMemo(() => sharedLevels(norms, epochs.map((e) => e.survey), s.bp, s.wp), [norms, epochs, s.bp, s.wp]);
@@ -323,33 +370,45 @@ export default function App() {
   const curves = useMemo(() => (centrePicked ? lightCurve(centrePicked) : []), [centrePicked]);
   const clickedPicked = useMemo(() => (spec.state === "done" ? pickMeasure(spec.points) : null), [spec]);
 
-  // ---- catalogue overlays, fetched only when switched on
-  useEffect(() => { setGaia([]); setKnown([]); setLab({ marks: [], path: [] }); }, [viewKey]);
+  // ---- Catalogue failures must not look like a successful empty sky.
+  useEffect(() => { setLab({ marks: [], path: [] }); }, [viewKey]);
+  const wantsGaia = ov.gaia || ov.motion;
   useEffect(() => {
-    if (!(ov.gaia || ov.motion) || gaia.length) return;
+    setGaia([]);
+    if (!wantsGaia) { setGaiaStatus({ loading: false, error: false, text: "" }); return; }
     const ctl = new AbortController();
-    setOvBusy("Looking up Gaia stars…");
-    getGaia(view, ctl.signal).then((g) => { if (!ctl.signal.aborted) { setGaia(g); setOvBusy(g.length ? "" : "No Gaia stars came back for this patch."); } });
+    setGaiaStatus({ loading: true, error: false, text: "Looking up Gaia stars…" });
+    lookupGaia(view, ctl.signal).then((result) => {
+      if (ctl.signal.aborted) return;
+      setGaia(result.items);
+      setGaiaStatus({ loading: false, error: result.unavailable, text: result.note || `${result.items.length} Gaia stars returned for this field.` });
+    });
     return () => ctl.abort();
-  }, [ov.gaia, ov.motion, viewKey]); // eslint-disable-line
-  const spxTimes = useMemo(() => epochs.filter((e) => e.survey === "spherex").map((e) => e.time), [epochs]);
+  }, [wantsGaia, viewKey, gaiaRetry]); // eslint-disable-line react-hooks/exhaustive-deps
+  const spxTimes = useMemo(() => epochs.filter((e) => e.survey === "spherex" && e.kind === "frame").map((e) => e.time), [epochs]);
+  const knownTimesKey = pickKnownTimes(spxTimes).join(",");
   useEffect(() => {
-    if (!ov.known || known.length || !spxTimes.length) return;
+    setKnown([]);
+    if (!ov.known || !knownTimesKey) { setKnownStatus({ loading: false, error: false, text: "" }); return; }
     const ctl = new AbortController();
-    setOvBusy("Asking which known asteroids were here on each date…");
-    getKnownObjects(view, spxTimes, ctl.signal).then((k) => { if (!ctl.signal.aborted) { setKnown(k); setOvBusy(k.length ? "" : "No known asteroids were in this patch on these dates."); } });
+    setKnownStatus({ loading: true, error: false, text: "Looking up known asteroids at the selected exposure dates…" });
+    lookupKnownObjects(view, knownTimesKey.split(","), ctl.signal).then((result) => {
+      if (ctl.signal.aborted) return;
+      setKnown(result.items);
+      setKnownStatus({ loading: false, error: result.unavailable, text: result.note || (result.items.length ? `${result.items.length} known-object positions returned.` : "The catalogue returned no known objects for the checked dates.") });
+    });
     return () => ctl.abort();
-  }, [ov.known, viewKey, spxTimes.length]); // eslint-disable-line
+  }, [ov.known, viewKey, knownTimesKey, knownRetry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- keyboard: space plays, arrows step
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      if (el && /^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(el.tagName)) return;
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || el?.closest("input,select,textarea,button,a,summary,[contenteditable=true],.data-table")) return;
       if (!animated || frames.length < 2) return;
       if (e.key === " ") { e.preventDefault(); setPlaying((v) => !v); }
-      else if (e.key === "ArrowRight") step(1);
-      else if (e.key === "ArrowLeft") step(-1);
+      else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -357,9 +416,9 @@ export default function App() {
 
   // ---- actions
   const jump = (ra: number, dec: number, label: string | undefined, extra: Partial<AppState> = {}) => {
+    nameRequest.current?.abort(); setResolving(false);
     setInputMsg({ kind: "ok", text: label ? `${label}: ${ra.toFixed(5)}, ${dec.toFixed(5)}` : `${fmtRA(ra)}  ${fmtDec(dec)}` });
     setInput(`${ra.toFixed(5)} ${dec.toFixed(5)}`);
-    cache.current.clear();
     setPx((p) => ({ ...p, on: false, reveal: false }));
     set({ ra, dec, frame: 0, a: null, b: null, pf: null, pt: null, det: null, ...extra });
   };
@@ -374,29 +433,35 @@ export default function App() {
     const name = text.trim();
     if (!name || !/[a-z]/i.test(name) || /^[\d\s.+\-:hmsd°'"]+$/i.test(name)) { setInputMsg({ kind: "err", text: r.error }); return; }
     // not coordinates and not a test target: ask the name service (any star, galaxy or nebula)
+    nameRequest.current?.abort();
+    const controller = new AbortController(); nameRequest.current = controller;
     setResolving(true); setInputMsg({ kind: "ok", text: `Looking up "${name}"…` });
     try {
-      const hit = await api.resolveName(name);
+      const hit = await api.resolveName(name, controller.signal);
+      if (controller.signal.aborted) return;
       if (hit) jump(hit.ra, hit.dec, hit.name);
       else setInputMsg({ kind: "err", text: `No object called "${name}" was found. Check the spelling, or enter RA and Dec.` });
-    } catch (e: any) { setInputMsg({ kind: "err", text: e?.message ?? "Name lookup failed. Enter RA and Dec instead." }); }
-    finally { setResolving(false); }
+    } catch (e: any) { if (!controller.signal.aborted) setInputMsg({ kind: "err", text: e?.message ?? "Name lookup failed. Enter RA and Dec instead." }); }
+    finally { if (nameRequest.current === controller) setResolving(false); }
   };
-  const applyWalk = (p: Partial<AppState>) => { cache.current.clear(); set({ ...p, frame: 0, a: null, b: null, pf: null, pt: null, det: null }); setInput(`${(p.ra ?? s.ra).toFixed(5)} ${(p.dec ?? s.dec).toFixed(5)}`); setInputMsg(null); };
+  const applyWalk = (p: Partial<AppState>) => { set({ ...p, frame: 0, a: null, b: null, pf: null, pt: null, det: null }); setInput(`${(p.ra ?? s.ra).toFixed(5)} ${(p.dec ?? s.dec).toFixed(5)}`); setInputMsg(null); };
   // drag, double-click, wheel and pinch on the picture: same settings, new patch of sky
   const recentre = (ra: number, dec: number) => {
-    cache.current.clear();
     setInput(`${ra.toFixed(5)} ${dec.toFixed(5)}`); setInputMsg(null);
     set({ ra, dec: Math.max(-90, Math.min(90, dec)) });
   };
   const zoom = (fov: number) => { cache.current.clear(); set({ fov }); };
   const pick = async (p: { x: number; y: number; ra: number; dec: number }) => {
+    spectrumRequest.current?.abort();
+    const controller = new AbortController();
+    spectrumRequest.current = controller;
     setPicked(p);
+    setSpecSeconds(0);
     setSpec({ state: "loading", points: [] });
     try {
-      const r = await api.getSpectrum(p.ra, p.dec, view, 6);
-      setSpec({ state: "done", points: r.points });
-    } catch (e: any) { setSpec({ state: "error", points: [], err: e?.message ?? String(e) }); }
+      const r = await api.getSpectrum(p.ra, p.dec, view, 6, controller.signal);
+      if (!controller.signal.aborted) setSpec({ state: "done", points: r.points });
+    } catch (e: any) { if (!controller.signal.aborted) setSpec({ state: "error", points: [], err: e?.message ?? String(e) }); }
   };
 
   const cur = curF ? epochs[curF.idx] : epochs[frameIdx];
@@ -464,6 +529,7 @@ export default function App() {
 
   return (
     <div className={`app ${s.embed ? "embed" : ""}`}>
+      <a className="skip-link" href="#sky-panel">Skip to sky viewer</a>
       {!s.embed && (
         <header className="top">
           <a className="wordmark" href="./" aria-label="SPHEREx Drift, start over">SPHEREx Drift</a>
@@ -474,6 +540,11 @@ export default function App() {
         <div className="banner" role="status" data-testid="mock-banner">
           {backend.reason === "unreachable" ? "Backend not reachable, so this shows synthetic demo data: " : "Demo mode: "}
           the sky is made up, with one moving star and one variable star.
+          <button type="button" className="btn small" disabled={reconnecting} onClick={async () => {
+            setReconnecting(true);
+            try { const result = await api.detectBackend(false); setBackend(result); if (!result.mock) { setTargets(await api.getTargets()); set({ mock: false }); setReload((n) => n + 1); } }
+            finally { setReconnecting(false); }
+          }}>{reconnecting ? "Connecting…" : "Retry real data"}</button>
         </div>
       )}
 
@@ -486,7 +557,8 @@ export default function App() {
               ? <p className="lede">{target.kind === "variable" ? "A star whose brightness changes." : target.kind === "mover" ? "A nearby object that moves across the sky." : ""}{expected ? <> It moves <b>{expected.rate.toFixed(1)}″ per year</b>, heading {expected.dir}.</> : null}</p>
               : <p className="lede coords">{fmtRA(s.ra)} {fmtDec(s.dec)}</p>}
             {expected && (
-              <>
+              <details className="target-info" open={targetInfoOpen} onToggle={(event) => setTargetInfoOpen(event.currentTarget.open)}>
+                <summary>Motion and measurements</summary>
                 <p className="note">The yellow ring marks where that motion puts it on each date.</p>
                 <p className="measured" data-testid="measured">
                   {measured
@@ -494,7 +566,7 @@ export default function App() {
                     : s.wise ? "Not enough clear detections yet to measure its motion from the pictures." : "Add the WISE images to measure its motion from the pictures."}
                 </p>
                 <label className="check"><input type="checkbox" checked={s.mark} onChange={(e) => set({ mark: e.target.checked })} data-testid="mark-toggle" /> Show expected position</label>
-              </>
+              </details>
             )}
             {target?.kind === "variable" && <p className="note">It stays in place. Watch it brighten and fade in Blink, or click it to compare its spectrum between passes.</p>}
           </section>
@@ -502,11 +574,11 @@ export default function App() {
           <form onSubmit={(e) => { e.preventDefault(); go(input); }} className="coordform">
             <h2 className="h"><label htmlFor="coords">Go to a position</label></h2>
             <div className="searchrow">
-              <input id="coords" data-testid="coord-input" value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
+              <input id="coords" data-testid="coord-input" aria-describedby="coordinate-feedback" aria-invalid={inputMsg?.kind === "err" || undefined} value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
                 placeholder="RA and Dec, or a target name" />
               <button className="go" type="submit" data-testid="coord-go" disabled={resolving}>Go</button>
             </div>
-            <div className={`msg ${inputMsg?.kind ?? ""}`} data-testid="coord-msg" role="status">{inputMsg?.text ?? `Now showing ${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
+            <div className={`msg ${inputMsg?.kind ?? ""}`} id="coordinate-feedback" data-testid="coord-msg" role="status">{inputMsg?.text ?? `Now showing ${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
             <p className="hint">Use decimal degrees, or a form like 08h55m10.8s -07d14m42s.</p>
           </form>
 
@@ -527,17 +599,46 @@ export default function App() {
         </nav>
 
         {/* ---------------- centre: the picture ---------------- */}
-        <main className="stage">
-          <div className="tabs" role="tablist">
+        <main className="stage" id="sky-panel" tabIndex={-1} aria-label="Sky viewer">
+          <div className="tabs" role="tablist" aria-label="Sky image display mode">
             {(["blink", "rainbow", "diff"] as Mode[]).map((m) => (
-              <button key={m} role="tab" aria-selected={s.mode === m} className={`tab ${s.mode === m ? "on" : ""}`} onClick={() => set({ mode: m })} data-testid={`mode-${m}`}>
+              <button key={m} id={`tab-${m}`} role="tab" tabIndex={s.mode === m ? 0 : -1} aria-selected={s.mode === m} className={`tab ${s.mode === m ? "on" : ""}`} onClick={() => set({ mode: m })} onKeyDown={(event) => {
+                const modes: Mode[] = ["blink", "rainbow", "diff"];
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault(); event.stopPropagation();
+                const next = event.key === "Home" ? 0 : event.key === "End" ? 2 : (modes.indexOf(m) + (event.key === "ArrowRight" ? 1 : 2)) % 3;
+                set({ mode: modes[next] }); document.getElementById(`tab-${modes[next]}`)?.focus();
+              }} data-testid={`mode-${m}`}>
                 <span className="tl">{modeName[m]}</span>
                 <span className="sub">{modeSub[m]}</span>
               </button>
             ))}
           </div>
 
-          {framesState === "error" && <div className="alert" data-testid="frames-error">Could not load the exposure list: {framesErr}</div>}
+          <div className="viewer-actions">
+            {s.embed ? <h1 className="stage-title">{target?.name ?? "Custom position"}</h1> : <span>{target?.name ?? "Custom position"}</span>}
+            <a href="#motion-tools" className="btn small" data-testid="find-shortcut">Find movers</a>
+            <a href="#spectrum-tools" className="btn small">Spectrum</a>
+          </div>
+          {animated && (
+            <div className="transport" data-testid="transport">
+              <button className="btn sq" onClick={() => step(-1)} aria-label="Previous date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M10 3 5 8l5 5" /></svg></button>
+              <button className="btn solid play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"} data-testid="play" disabled={avail.length < 2}>{playing
+                  ? <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4 3h3v10H4zM9 3h3v10H9z" /></svg><span>Pause</span></>
+                  : <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4.5 2.5v11l9-5.5z" /></svg><span>Play</span></>}</button>
+              <button className="btn sq" onClick={() => step(1)} aria-label="Next date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M6 3l5 5-5 5" /></svg></button>
+              <span className="count" data-testid="frame-count">{frames.length ? `${fi + 1} of ${frames.length}` : ""}</span>
+              <label className="inline">Speed
+                <input type="range" min="0.25" max="6" step="0.25" value={s.speed} onChange={(e) => set({ speed: +e.target.value })} aria-label="Playback speed" data-testid="speed" />
+                <span className="mono">{s.speed}/s</span>
+              </label>
+              {cur && !many && listing === "done" && (cur.flags.length > 0
+                ? <details className="quality-flags"><summary className="badge warn" data-testid="flags">{cur.flags.length} quality {cur.flags.length === 1 ? "flag" : "flags"}</summary><ul>{cur.flags.map((flag) => <li key={flag}><b>{flag.replace(/_/g, " ")}</b>: {flagHelp(flag)}</li>)}</ul></details>
+                : <span className="badge ok" title="No quality flags near the centre">clean</span>)}
+            </div>
+          )}
+
+          {framesState === "error" && <div className="alert" data-testid="frames-error">Could not load the exposure list: {framesErr}<button type="button" className="btn small" onClick={() => setReload((n) => n + 1)} data-testid="frames-retry">Try again</button></div>}
           {noCoverage && <div className="alert" data-testid="no-coverage">No SPHEREx exposures cover this position yet. Try one of the test targets, or a different position.</div>}
 
           <Viewer
@@ -548,7 +649,7 @@ export default function App() {
           >
             {(ov.gaia || ov.motion || ov.known) && s.mode !== "rainbow" && cur && (
               <SkyOverlay view={view} epochMs={cur.ms} spanMs={epochs.length > 1 ? [epochs[0].ms, epochs[n - 1].ms] : undefined}
-                gaia={gaia} known={known} showGaia={ov.gaia} showMotion={ov.motion} showKnown={ov.known} />
+                gaia={gaia} known={known} showGaia={ov.gaia} showMotion={ov.motion} showKnown={ov.known && cur.survey === "spherex" && cur.kind === "frame"} invert={s.inv} />
             )}
           </Viewer>
           {px.on && <p className="simnote" data-testid="px-note">These pictures contain one simulated object. Everything else is real.</p>}
@@ -587,23 +688,6 @@ export default function App() {
               )}
             </div>
           )}
-          {animated && (
-            <div className="transport" data-testid="transport">
-              <button className="btn sq" onClick={() => step(-1)} aria-label="Previous date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M10 3 5 8l5 5" /></svg></button>
-              <button className="btn solid play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"} data-testid="play" disabled={avail.length < 2}>{playing
-                  ? <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4 3h3v10H4zM9 3h3v10H9z" /></svg><span>Pause</span></>
-                  : <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4.5 2.5v11l9-5.5z" /></svg><span>Play</span></>}</button>
-              <button className="btn sq" onClick={() => step(1)} aria-label="Next date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M6 3l5 5-5 5" /></svg></button>
-              <span className="count" data-testid="frame-count">{frames.length ? `${fi + 1} of ${frames.length}` : ""}</span>
-              <label className="inline">Speed
-                <input type="range" min="0.25" max="6" step="0.25" value={s.speed} onChange={(e) => set({ speed: +e.target.value })} aria-label="Playback speed" />
-                <span className="mono">{s.speed}/s</span>
-              </label>
-              {cur && !many && listing === "done" && (cur.flags.length > 0
-                ? <span className="badge warn" data-testid="flags" title={cur.flags.map((f) => `${f.replace(/_/g, " ")}: ${flagHelp(f)}`).join("\n")}>{cur.flags.length} quality {cur.flags.length === 1 ? "flag" : "flags"}</span>
-                : <span className="badge ok" title="No quality flags near the centre">clean</span>)}
-            </div>
-          )}
           {animated && n > 1 && (
             <div className="combine" data-testid="combine">
               <label className="field">Combine dates within <span className="val">{s.win ? `${Math.min(s.win, winMax)} ${Math.min(s.win, winMax) === 1 ? "year" : "years"}` : "off, single dates"}</span>
@@ -618,8 +702,14 @@ export default function App() {
           <Filmstrip epochs={epochs} thumbs={thumbs} marks={marks} onSelect={selectEpoch} />
           <Timeline epochs={epochs} marks={marks} onSelect={selectEpoch} />
           <p className="prog" data-testid="progress" role="status">
-            {framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · now fetching ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}${listing === "full" ? ". Still checking wavelengths and quality flags for every exposure." : ""}` : ""}
+            {!n && framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · now fetching ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}${listing === "full" ? ". Still checking wavelengths and quality flags for every exposure." : ""}` : ""}
           </p>
+          {prog.failed > 0 && <button type="button" className="btn small" data-testid="images-retry" onClick={() => setImageAttempt((n) => n + 1)}>Retry {prog.failed} failed images</button>}
+          <section id="motion-tools" tabIndex={-1} className="motion-tools" aria-label="Find something that moves">
+            <MotionLab norms={norms} epochs={epochs} fovArcmin={s.fov} catalogPm={target?.pm_mas_yr} picked={picked ? { x: picked.x, y: picked.y } : null} pickedMs={cur?.ms}
+              onMarks={(marks, path) => setLab({ marks, path: path ?? [] })} />
+          </section>
+
         </main>
 
         {/* ---------------- right: instrument settings ---------------- */}
@@ -627,7 +717,7 @@ export default function App() {
           <section>
             <h2 className="h">View</h2>
             <label className="field">Field of view <span className="val">{s.fov}′</span>
-              <input type="range" min="1" max="30" step="0.5" value={s.fov} onChange={(e) => { cache.current.clear(); set({ fov: +e.target.value }); }} aria-label="Field of view" data-testid="fov" /></label>
+              <input type="range" min="1" max="30" step="0.5" value={s.fov} onChange={(e) => set({ fov: +e.target.value })} aria-label="Field of view" data-testid="fov" /></label>
             <label className="field">Wavelength
               <select value={det} onChange={(e) => set({ det: +e.target.value, frame: 0, a: null, b: null })} data-testid="detector">
                 {(detInfo.length ? detInfo : [1, 2, 3, 4, 5, 6].map((d) => ({ detector: d, wl: 0, passes: [] as number[], nFrames: 0 }))).map((d) => <option key={d.detector} value={d.detector}>{d.wl ? `${d.wl.toFixed(1)} µm, ` : ""}detector {d.detector}{d.passes.length ? `, ${d.passes.length} passes` : ""}</option>)}
@@ -639,9 +729,16 @@ export default function App() {
             <label className="check"><input type="checkbox" checked={s.cross} onChange={(e) => set({ cross: e.target.checked })} /> Crosshair</label>
             <label className="check"><input type="checkbox" checked={ov.gaia} onChange={(e) => setOv((o) => ({ ...o, gaia: e.target.checked }))} data-testid="ov-gaia" /> Mark Gaia catalogue stars</label>
             <label className="check"><input type="checkbox" checked={ov.motion} onChange={(e) => setOv((o) => ({ ...o, motion: e.target.checked }))} data-testid="ov-motion" /> Arrows on stars Gaia says are moving</label>
-            <label className="check"><input type="checkbox" checked={ov.known} onChange={(e) => setOv((o) => ({ ...o, known: e.target.checked }))} data-testid="ov-known" /> Label known asteroids</label>
-            {ovBusy && (ov.gaia || ov.motion || ov.known) && <p className="dim small" role="status">{ovBusy}</p>}
-            {(ov.gaia || ov.motion || ov.known) && <p className="dim small">A mover with no ring, arrow or label is one no catalogue lists here.</p>}
+            <label className="check"><input type="checkbox" checked={ov.known} onChange={(e) => { const checked = e.target.checked; setOv((o) => ({ ...o, known: checked })); if (checked) set({ src: "frame", wise: false, frame: 0 }); }} data-testid="ov-known" /> Label known asteroids</label>
+            {wantsGaia && <div role="status" className="dim small" data-testid="gaia-status">{gaiaStatus.text}{gaiaStatus.error && <button type="button" className="btn small" onClick={() => retryGaia((n) => n + 1)}>Retry Gaia</button>}</div>}
+            {ov.known && <div role="status" className="dim small" data-testid="known-status">
+              {knownStatus.text}
+              {knownStatus.error && <button type="button" className="btn small" onClick={() => retryKnown((n) => n + 1)}>Retry asteroids</button>}
+              <p>Labels apply to individual SPHEREx exposures, within 6 hours of up to 12 checked dates. Pass stacks and WISE images combine multiple nights. Positions are approximate, as seen from Earth’s centre.</p>
+              {s.src !== "frame" && <button type="button" className="btn small" onClick={() => set({ src: "frame", wise: false, frame: 0 })}>Use individual SPHEREx exposures</button>}
+              {!!known.length && <details><summary>Known objects as text</summary><ul>{known.map((o, i) => <li key={`${o.name}-${o.time}-${i}`}>{o.name}, {o.time}, RA {o.ra.toFixed(5)}°, Dec {o.dec.toFixed(5)}°</li>)}</ul></details>}
+            </div>}
+            {(wantsGaia || ov.known) && <p className="dim small">Catalogue markers show returned matches. An object without a marker may still be catalogued.</p>}
             <label className="check"><input type="checkbox" checked={s.sharp} onChange={(e) => set({ sharp: e.target.checked })} data-testid="sharp-toggle" /> Sharp pixels</label>
             <label className="check"><input type="checkbox" checked={s.inv} onChange={(e) => set({ inv: e.target.checked })} data-testid="invert-toggle" /> Invert, white sky and dark stars</label>
             {wiseNote && <p className="dim small">{wiseNote}</p>}
@@ -650,7 +747,7 @@ export default function App() {
                 <summary>Brightness and contrast</summary>
                 <div className="stretch" data-testid="stretch">
                   <div className="seg" role="group" aria-label="Stretch">
-                    {(["asinh", "linear", "log"] as const).map((k) => <button key={k} className={`segbtn ${s.stretch === k ? "on" : ""}`} onClick={() => set({ stretch: k })} data-testid={`stretch-${k}`}>{k}</button>)}
+                    {(["asinh", "linear", "log"] as const).map((k) => <button key={k} aria-pressed={s.stretch === k} className={`segbtn ${s.stretch === k ? "on" : ""}`} onClick={() => set({ stretch: k })} data-testid={`stretch-${k}`}>{k}</button>)}
                   </div>
                   <label className="field">Black point <span className="val">{s.bp}%</span><input type="range" min="0" max="95" step="1" value={s.bp} onChange={(e) => set({ bp: Math.min(+e.target.value, s.wp - 1) })} data-testid="bp" /></label>
                   <label className="field">White point <span className="val">{s.wp}%</span><input type="range" min="90" max="100" step="0.1" value={s.wp} onChange={(e) => set({ wp: Math.max(+e.target.value, s.bp + 1) })} data-testid="wp" /></label>
@@ -666,7 +763,10 @@ export default function App() {
             <Pad
               frames={spx} detector={det} passFrom={passFrom} passTo={passTo} currentPass={cur?.survey === "spherex" ? cur.pass : null}
               onSelect={(sel) => {
-                if (sel.click) set({ det: sel.detector, pf: null, pt: null, frame: Math.max(0, epochs.findIndex((e) => e.survey === "spherex" && e.pass === sel.passFrom)), a: null, b: null });
+                if (sel.click) {
+                  const nextEpochs = buildEpochs(spx, wise, { src: s.src, detector: sel.detector, includeWise: s.wise, passFrom: allPasses[0] ?? 1, passTo: allPasses[allPasses.length - 1] ?? 1 });
+                  set({ det: sel.detector, pf: null, pt: null, frame: Math.max(0, nextEpochs.findIndex((e) => e.survey === "spherex" && e.pass === sel.passFrom)), a: null, b: null });
+                }
                 else set({ det: sel.detector, pf: sel.passFrom, pt: sel.passTo, frame: 0, a: null, b: null });
               }}
             />
@@ -684,47 +784,28 @@ export default function App() {
                 : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx data here." : <><i className="spin" /> Measuring whatever sits at the centre in every exposure…</>}</p>}
           </section>
 
-          <section data-testid="spectrum-panel">
+          <section id="spectrum-tools" tabIndex={-1} data-testid="spectrum-panel">
             <h2 className="h">Spectrum</h2>
-            {spec.state === "loading" && <p className="dim" role="status"><i className="spin" /> Measuring the spectrum there. Near the centre this takes a few seconds; far from it, up to a minute.</p>}
-            {spec.state === "error" && <p className="alert">Spectrum failed: {spec.err}</p>}
+            {spec.state === "loading" && <div role="status" data-testid="spectrum-loading">
+              <p className="dim"><i className="spin" /> Measuring the spectrum · {specSeconds}s of 30s. {specSeconds >= 10 ? "The archive is still fetching pixels for this spot." : "Checking the available exposures."}</p>
+              <button type="button" className="btn small" data-testid="spectrum-cancel" onClick={() => { spectrumRequest.current?.abort(); setSpec({ state: "error", points: [], err: "Measurement cancelled." }); }}>Cancel</button>
+            </div>}
+            {spec.state === "error" && <div className="alert" role="status" data-testid="spectrum-error">
+              <p>{spec.err}</p>
+              {picked && <button type="button" className="btn small" data-testid="spectrum-retry" onClick={() => pick(picked)}>Try again</button>}
+            </div>}
             {spec.state === "done" && picked && clickedPicked && <Spectrum picked={clickedPicked} title={`Where you clicked: RA ${picked.ra.toFixed(5)}, Dec ${picked.dec.toFixed(5)}`} />}
-            {spec.state === "idle" && (centrePicked && centrePicked.pts.length
+            {spec.state === "idle" && (centre.state === "error"
+              ? <div className="alert" role="status"><p>The spectrum could not be measured. Try again, or click another star.</p><button type="button" className="btn small" onClick={() => pick({ x: (SIZE - 1) / 2, y: (SIZE - 1) / 2, ra: s.ra, dec: s.dec })}>Retry at the centre</button></div>
+              : centrePicked && centrePicked.pts.length
               ? <Spectrum picked={centrePicked} title={expected ? `${target?.name ?? "The object"}, measured where it is now` : "At the centre of the picture"} />
-              : <p className="dim" role="status">{centre.state === "done" ? "Nothing bright enough to measure at that spot." : <><i className="spin" /> Measuring brightness at every wavelength. This can take up to a minute the first time.</>}</p>)}
+              : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx spectrum is available for this field." : centre.state === "done" ? "Nothing bright enough to measure at that spot." : <><i className="spin" /> Measuring brightness at every wavelength. This can take up to a minute the first time.</>}</p>)}
             {spec.state !== "loading" && <p className="dim small">Click any star in the picture to see its spectrum instead.</p>}
           </section>
 
+          <PlanetXPanel value={px} onChange={setPx} epochsCount={epochs.length} spanYears={spanYr} fovArcmin={s.fov} inViewCount={planet?.inView ?? 0} />
           <section>
-            <MotionLab norms={norms} epochs={epochs} fovArcmin={s.fov} catalogPm={target?.pm_mas_yr} picked={picked ? { x: picked.x, y: picked.y } : null} pickedMs={cur?.ms}
-              onMarks={(marks, path) => setLab({ marks, path: path ?? [] })} />
-          </section>
-
-          <section data-testid="planetx-panel">
-            <h2 className="h">Could you spot a Planet X?</h2>
-            <p className="dim small">Hide a simulated distant planet in these real images, then try to find it. Nothing like it has been found; this tests whether the pictures could show one.</p>
-            <label className="check"><input type="checkbox" checked={px.on} onChange={(e) => setPx((v) => ({ ...v, on: e.target.checked, reveal: false, seed: e.target.checked ? Math.floor(Math.random() * 1e9) : v.seed }))} data-testid="px-toggle" /> Hide a simulated planet</label>
-            {px.on && (
-              <div className="pxbox">
-                <label className="field">Distance from the Sun
-                  <select value={px.dist} onChange={(e) => setPx((v) => ({ ...v, dist: +e.target.value, reveal: false }))} data-testid="px-dist">
-                    {[500, 2000, 5000, 20000].map((d) => <option key={d} value={d}>{d.toLocaleString("en")} times the Earth-Sun distance</option>)}
-                  </select></label>
-                <label className="field">Brightness
-                  <select value={px.snr} onChange={(e) => setPx((v) => ({ ...v, snr: +e.target.value, reveal: false }))} data-testid="px-snr">
-                    <option value={6}>Faint, barely above the noise</option><option value={12}>Medium</option><option value={30}>Bright</option>
-                  </select></label>
-                <p className="dim small">At that distance it swings {fmtArc(apparentMotion(px.dist).wobbleArcsec)} each way every year as the Earth moves, and drifts {fmtArc(apparentMotion(px.dist).driftArcsecYr)} a year along its orbit.</p>
-                {planet && planet.inView < Math.max(2, epochs.length / 2) && <p className="alert warn">That swing is wider than this picture, so it is out of view on most dates. Widen the field of view to about {Math.min(30, Math.max(Math.ceil(s.fov) + 3, Math.ceil(((2 * apparentMotion(px.dist).wobbleArcsec + apparentMotion(px.dist).driftArcsecYr * (epochs.length > 1 ? msToYear(epochs[n - 1].ms) - msToYear(epochs[0].ms) : 1)) * 1.6) / 60)))}′, or pick a larger distance.</p>}
-                <div className="row">
-                  <button className="btn small" onClick={() => setPx((v) => ({ ...v, reveal: !v.reveal }))} data-testid="px-reveal">{px.reveal ? "Hide the answer" : "Show where it is"}</button>
-                  <button className="btn small" onClick={() => setPx((v) => ({ ...v, seed: Math.floor(Math.random() * 1e9), reveal: false }))}>Hide it somewhere else</button>
-                </div>
-              </div>
-            )}
-          </section>
-          <section>
-            <ContextPanel view={view} />
+            {ready && <ContextPanel view={view} />}
           </section>
         </aside>
       </div>

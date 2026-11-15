@@ -1,18 +1,18 @@
 // Synthetic backend for ?mock=1 / offline development. Produces the same shapes as CONTRACT.md.
 // Mock scene (size N px across `fov` arcmin): fixed stars, ONE MOVER (brown-dwarf-like) that is at the
-// image centre in 2026.0 and moves (-18, +14) px/yr * (5/fov) (x right, y down), ONE VARIABLE star at (96,168).
+// image centre in 2026.0 and moves (6.9, -0.6) px/yr * (5/fov) (x right, y down), ONE VARIABLE star at (96,168).
 import type { Frame, FramesResponse, Target, SpectrumResponse, Img } from "./types";
 import { pix2sky, sky2pix } from "./coords";
 
 export const MOCK_TARGETS: Target[] = [
   { id: "barnard", name: "Barnard's Star", ra: 269.4521, dec: 4.6934, note: "nearest single star, high proper motion", kind: "mover" },
   { id: "epsindib", name: "Epsilon Indi B", ra: 330.8704, dec: -56.7861, note: "brown dwarf pair orbiting a star", kind: "mover" },
-  { id: "wise0855", name: "WISE 0855", ra: 133.795129, dec: -7.245147, note: "fast-moving brown dwarf (made-up motion in demo mode)", kind: "mover", pm_mas_yr: [21094, -16406], epoch: 2026 },
+  { id: "wise0855", name: "WISE 0855", ra: 133.795129, dec: -7.245147, note: "fast-moving brown dwarf (made-up sky in demo mode)", kind: "mover", pm_mas_yr: [-8086, 703], epoch: 2026 },
   { id: "rwaur", name: "RW Aurigae", ra: 76.9588, dec: 30.4004, note: "variable star", kind: "variable" },
   { id: "rdra", name: "R Draconis", ra: 244.3982, dec: 66.7586, note: "variable star", kind: "variable" },
 ];
 
-export const MOVER_V = { x: -18, y: 14 }; // px/yr at fov=5
+export const MOVER_V = { x: 6.9, y: -0.6 }; // px/yr at fov=5: stays in view across the WISE baseline
 export const VAR_POS = { x: 96, y: 168 };
 export const MOCK_SIZE = 256;
 const DET_WL = [0.85, 1.15, 1.6, 2.4, 3.6, 4.6];
@@ -105,7 +105,8 @@ export function mockImage(ra: number, dec: number, fov: number, size: number, sp
   const wlf = (slope: number) => Math.pow(spec.wl / 2.2, slope);
   for (const s of stars) gauss(a, n, s.x * sc, s.y * sc, s.f * wlf(s.slope), sig);
   // variable star: 1.2-year period, big amplitude
-  gauss(a, n, VAR_POS.x * sc, VAR_POS.y * sc, 600 * (1 + 0.75 * Math.sin((2 * Math.PI * spec.year) / 1.2)) * wlf(0.1), sig);
+  const variableTarget = MOCK_TARGETS.some(t => t.kind === "variable" && Math.hypot(t.ra - ra, t.dec - dec) < 0.001);
+  gauss(a, n, (variableTarget ? 128 : VAR_POS.x) * sc, (variableTarget ? 128 : VAR_POS.y) * sc, 600 * (1 + 0.75 * Math.sin((2 * Math.PI * spec.year) / 1.2)) * wlf(0.1), sig);
   // mover: brighter at long wavelengths (brown dwarf)
   const dt = spec.year - 2026;
   const mx = 128 + MOVER_V.x * pxScale * dt, my = 128 + MOVER_V.y * pxScale * dt;
@@ -148,12 +149,13 @@ export function mockStack(ra: number, dec: number, fov: number, pass: number, de
 export function mockSpectrum(ra: number, dec: number, radiusArcsec: number, center: { ra: number; dec: number }, fov: number): SpectrumResponse {
   // The mock spectrum depends on where, relative to the field centre, the click landed.
   const p = sky2pix(ra, dec, 256, (fov * 60) / 256, center.ra, center.dec);
-  const nearVar = Math.hypot(p.x - VAR_POS.x, p.y - VAR_POS.y) < 8;
+  const variableTarget = MOCK_TARGETS.some(t => t.kind === "variable" && Math.hypot(t.ra - center.ra, t.dec - center.dec) < 0.001);
+  const nearVar = Math.hypot(p.x - (variableTarget ? 128 : VAR_POS.x), p.y - (variableTarget ? 128 : VAR_POS.y)) < 8;
   const points: SpectrumResponse["points"] = [];
   PASS_DATES.forEach((d, pi) => {
-    for (let det = 1; det <= 6; det++) for (let k = 0; k < 2; k++) {
+    for (let det = 1; det <= 6; det++) for (let k = 0; k < 6; k++) {
       if (pi === 2 && det === 3 && k === 1) continue;
-      const wl = DET_WL[det - 1] * (1 + 0.04 * (k - 0.5));
+      const wl = DET_WL[det - 1] * (1 + 0.008 * (k - 2.5));
       let f = 20 * Math.pow(wl / 2.2, -1.2) + 4;
       f *= 1 - 0.45 * Math.exp(-((wl - 3.0) ** 2) / (2 * 0.12 ** 2)) * (nearVar ? 0.3 : 1); // water-ice dip
       f *= 1 - 0.3 * Math.exp(-((wl - 4.27) ** 2) / (2 * 0.06 ** 2));

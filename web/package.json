@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start -p 3000",
     "test": "vitest run",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "e2e:readiness": "node e2e/readiness.mjs",
+    "e2e:audit": "node e2e/full-audit.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "next": "15.5.4",
@@ -18,6 +21,8 @@
     "@types/node": "22.13.10",
     "@types/react": "19.1.12",
     "@types/react-dom": "19.1.9",
+    "axe-core": "^4.14.0",
+    "playwright": "^1.48.2",
     "typescript": "5.9.2",
     "vitest": "3.2.4"
   }

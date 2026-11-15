@@ -1,6 +1,6 @@
 // Catalogue overlays and context: Gaia stars, known solar-system objects, a picture of the same field from
 // another survey, and look-up links. Backend: api/app/overlays.py (see CONTRACT.md "Catalogue overlays").
-// Nothing here throws: a service being down gives an empty list so the page keeps working.
+// Catalogue failures are kept distinct from a successful empty result.
 import { API_URL, isMock } from "./api";
 import { sky2pix } from "./coords";
 import type { View } from "./types";
@@ -33,11 +33,17 @@ const J2000_MS = Date.UTC(2000, 0, 1, 12);
 const qs = (o: Record<string, string | number>) => Object.entries(o).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join("&");
 const viewQ = (v: View) => qs({ ra: v.ra, dec: v.dec, fov: v.fov });
 
-async function json<T>(path: string, signal?: AbortSignal): Promise<T | null> {
+async function json<T>(path: string, signal?: AbortSignal, timeoutMs = 30000): Promise<T | null> {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  const timer = setTimeout(abort, timeoutMs);
   try {
-    const r = await fetch(API_URL + path, { signal });
+    const r = await fetch(API_URL + path, { signal: controller.signal });
     return r.ok ? ((await r.json()) as T) : null;
   } catch { return null; }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 }
 
 // ---------------------------------------------------------------- geometry
@@ -118,9 +124,14 @@ function mockKnown(v: View, times: string[]): KnownObject[] {
 
 /** Gaia DR3 stars in the field (up to 300 brightest plus every fast mover). Empty when no service answers. */
 export async function getGaia(v: View, signal?: AbortSignal): Promise<GaiaSource[]> {
-  if (isMock()) return mockGaia(v);
-  const j = await json<{ sources: GaiaSource[] }>(`/gaia?${viewQ(v)}`, signal);
-  return j?.sources ?? [];
+  return (await lookupGaia(v, signal)).items;
+}
+export type CatalogueResult<T> = { items: T[]; note?: string; unavailable: boolean };
+export async function lookupGaia(v: View, signal?: AbortSignal): Promise<CatalogueResult<GaiaSource>> {
+  if (isMock()) return { items: mockGaia(v), unavailable: false };
+  const j = await json<{ sources: GaiaSource[]; note?: string }>(`/gaia?${viewQ(v)}`, signal, 45000);
+  return { items: j?.sources ?? [], unavailable: !j || !!j.note,
+    note: j?.note || (!j ? "The Gaia catalogue could not be reached. Try again." : undefined) };
 }
 /** Kept for older callers. */
 export const getGaiaSources = getGaia;
@@ -130,11 +141,15 @@ export const getGaiaSources = getGaia;
  * representative times (the first lookup takes 5 to 9 seconds per time, later ones are instant).
  */
 export async function getKnownObjects(v: View, timesIso: string[], signal?: AbortSignal): Promise<KnownObject[]> {
+  return (await lookupKnownObjects(v, timesIso, signal)).items;
+}
+export async function lookupKnownObjects(v: View, timesIso: string[], signal?: AbortSignal): Promise<CatalogueResult<KnownObject>> {
   const times = pickKnownTimes(timesIso);
-  if (!times.length) return [];
-  if (isMock()) return mockKnown(v, times);
-  const j = await json<{ objects: KnownObject[] }>(`/known?${viewQ(v)}&times=${encodeURIComponent(times.join(","))}`, signal);
-  return j?.objects ?? [];
+  if (!times.length) return { items: [], unavailable: false };
+  if (isMock()) return { items: mockKnown(v, times), unavailable: false };
+  const j = await json<{ objects: KnownObject[]; note?: string }>(`/known?${viewQ(v)}&times=${encodeURIComponent(times.join(","))}`, signal, 90000);
+  return { items: j?.objects ?? [], unavailable: !j || !!j.note,
+    note: j?.note || (!j ? "The asteroid catalogue could not be reached. Try again." : undefined) };
 }
 
 /** URL of the colour picture of the same field from another survey (JPEG, north up, east left). */

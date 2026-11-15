@@ -1,0 +1,18 @@
+
+> spherex-drift-web@0.1.0 e2e:readiness
+> node e2e/readiness.mjs
+
+PASS real backend is connected
+All default images loaded in 4415ms (includes injected network delays)
+PASS metadata refresh did not duplicate WISE downloads (23 requests)
+PASS playback and Find movers shortcut are visible on a laptop
+PASS real WISE 0855 finder still recovers the mover
+PASS Cancel exits the spectrum spinner
+PASS a stalled spectrum stops after 30 seconds and offers retry
+PASS changing targets clears the previous spectrum request and error
+PASS no desktop page errors ()
+PASS phone has no horizontal page overflow
+PASS swiping over the sky scrolls the page without changing the sky position
+PASS Move sky by touch explicitly enables sky gestures
+PASS touch movement pans the sky without selecting a spectrum
+PASS Done moving sky restores page scrolling

@@ -1,0 +1,109 @@
+
+> spherex-drift-web@0.1.0 e2e
+> node e2e/smoke.mjs
+
+PASS desktop blink: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: blink autoplays (frames advance without pressing Play)
+PASS desktop: the button offers Pause while autoplaying
+PASS desktop: pause holds the frame
+PASS desktop: paused state is in the URL
+PASS desktop: sharp pixels on by default
+PASS desktop: invert turns the dark sky white (mean 19 -> 236)
+PASS desktop: sharp pixels can be turned off
+PASS desktop: stepping changes the shown epoch ("Pass 4 stack 2026-11-04, 2.40 " -> "Pass 1 stack 2025-06-12, 2.40 ")
+PASS desktop: play advances frames
+PASS desktop: RA/Dec readout on hover
+PASS desktop rainbow: no horizontal overflow (scrollWidth 1440 <= 1440)
+  rainbow stats {"colored":312,"coloredBox":123,"blue":434,"orange":53,"nonblack":2900,"star":[255,255,255]}
+PASS desktop: rainbow shows a coloured streak near the mover (123 px)
+PASS desktop: stationary bright star is ~white (255,255,255)
+PASS desktop: difference opens on each date minus the rest
+PASS desktop: each date minus the rest shows the mover in orange (56 px)
+PASS desktop: each date minus the rest cancels the fixed bright star (brightest residual 17 of 765)
+PASS desktop: each date minus the rest plays as an animation
+PASS desktop diff each: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: first and last dates only leaves two frames (4 of 4 -> 2 of 2)
+PASS desktop: combining over the full span leaves one frame (1 of 1)
+PASS desktop: window off restores every date (4 of 4)
+PASS desktop diff: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: diff default A (0) != B (3)
+  diff stats {"colored":152,"coloredBox":101,"blue":54,"orange":115,"nonblack":206,"star":[0,3,5]}
+PASS desktop: diff has blue (54) and orange (115) pixels
+PASS desktop: diff is not blank
+PASS desktop: no wavelength warning for same-detector diff
+PASS desktop: mismatched wavelength warning appears with WISE included
+PASS desktop: pad drag selects detector 5 passes 1-3 (ra=133.795129&dec=-7.245147&fov=5&mode=blink&detector=5&pf=1&pt=3&mock=1&play=0)
+PASS desktop: spectrum has 3 line markers
+PASS desktop: spectrum has points
+PASS desktop spectrum: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: sexagesimal WISE 0855 -> 133.795129, -7.245147
+PASS desktop: "Orion Nebula" gives a clear no-match message
+PASS desktop: "r" does not match R Draconis
+PASS desktop: R Draconis resolves
+PASS desktop: quick-pick WISE 0855
+PASS desktop: the picture follows the pointer during a drag
+PASS desktop: drag pans (centre moved 60.0″ east, 37.5″ north)
+PASS desktop: a drag is not taken for a click
+PASS desktop: the picture settles after the pan
+PASS desktop: wheel changes the field of view (5 -> 8)
+PASS desktop: double-click recentres on that point
+PASS desktop after pan and zoom: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: bare link opens on blink, playing, with WISE (?ra=133.795129&dec=-7.245147&fov=5&mode=blink&wise=1&mock=1)
+PASS desktop: the border flashes when the loop starts over
+PASS desktop: mode restored from URL
+PASS desktop: embed hides header
+PASS desktop embed: no horizontal overflow (scrollWidth 1440 <= 1440)
+PASS desktop: no console/page errors
+PASS phone blink: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: blink autoplays (frames advance without pressing Play)
+PASS phone: the button offers Pause while autoplaying
+PASS phone: pause holds the frame
+PASS phone: paused state is in the URL
+PASS phone: sharp pixels on by default
+PASS phone: invert turns the dark sky white (mean 16 -> 239)
+PASS phone: sharp pixels can be turned off
+PASS phone: stepping changes the shown epoch ("Pass 2 stack 2025-12-10, 2.40 " -> "Pass 3 stack 2026-06-11, 2.40 ")
+PASS phone: play advances frames
+PASS phone rainbow: no horizontal overflow (scrollWidth 390 <= 390)
+  rainbow stats {"colored":312,"coloredBox":123,"blue":434,"orange":53,"nonblack":2900,"star":[255,255,255]}
+PASS phone: rainbow shows a coloured streak near the mover (123 px)
+PASS phone: stationary bright star is ~white (255,255,255)
+PASS phone: difference opens on each date minus the rest
+PASS phone: each date minus the rest shows the mover in orange (51 px)
+PASS phone: each date minus the rest cancels the fixed bright star (brightest residual 12 of 765)
+PASS phone: each date minus the rest plays as an animation
+PASS phone diff each: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: first and last dates only leaves two frames (2 of 4 -> 1 of 2)
+PASS phone: combining over the full span leaves one frame (1 of 1)
+PASS phone: window off restores every date (2 of 4)
+PASS phone diff: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: diff default A (0) != B (3)
+  diff stats {"colored":152,"coloredBox":101,"blue":54,"orange":115,"nonblack":206,"star":[0,3,5]}
+PASS phone: diff has blue (54) and orange (115) pixels
+PASS phone: diff is not blank
+PASS phone: no wavelength warning for same-detector diff
+PASS phone: mismatched wavelength warning appears with WISE included
+PASS phone: pad drag selects detector 5 passes 1-3 (ra=133.795129&dec=-7.245147&fov=5&mode=blink&detector=5&pf=1&pt=3&mock=1&play=0)
+PASS phone: spectrum has 3 line markers
+PASS phone: spectrum has points
+PASS phone spectrum: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: sexagesimal WISE 0855 -> 133.795129, -7.245147
+PASS phone: "Orion Nebula" gives a clear no-match message
+PASS phone: "r" does not match R Draconis
+PASS phone: R Draconis resolves
+PASS phone: quick-pick WISE 0855
+PASS phone: the picture follows the pointer during a drag
+PASS phone: drag pans (centre moved 60.0″ east, 37.5″ north)
+PASS phone: a drag is not taken for a click
+PASS phone: the picture settles after the pan
+PASS phone: wheel changes the field of view (5 -> 8)
+PASS phone: double-click recentres on that point
+PASS phone after pan and zoom: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: bare link opens on blink, playing, with WISE (?ra=133.795129&dec=-7.245147&fov=5&mode=blink&wise=1&mock=1)
+PASS phone: the border flashes when the loop starts over
+PASS phone: mode restored from URL
+PASS phone: embed hides header
+PASS phone embed: no horizontal overflow (scrollWidth 390 <= 390)
+PASS phone: no console/page errors
+
+ALL PASSED

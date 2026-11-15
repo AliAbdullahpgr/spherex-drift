@@ -30,6 +30,7 @@ const rateText = (r: number) => `${r >= 10 ? r.toFixed(0) : r >= 1 ? r.toFixed(1
 const tidy = (arcsec: number) => String(Math.round(arcsec * 100) / 100);
 const later = (fn: () => void) => setTimeout(fn, 30); // let "Working" paint before the sums start
 const SURVEY: Record<string, string> = { spherex: "SPHEREx", wise: "WISE" };
+const FINDER_MAX_RATE = 40; // includes the fast mover in the labelled demo sky
 
 type StackResult = { stack: Stack; peak: { x: number; y: number; value: number }; still: number; east: number; north: number; search?: SearchResult };
 
@@ -72,7 +73,8 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
   useEffect(() => {
     cancel.current.cancelled = true; cancel.current = { cancelled: false };
     setRes(null); setCands(null); setScore(null); setShown(-1); setNote(""); setBusy(""); setProgress("");
-  }, [dataKey]);
+    onMarks?.([], []);
+  }, [dataKey, norms]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { cancel.current.cancelled = true; }, []);
 
   useEffect(() => {
@@ -94,7 +96,8 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
   const runStack = (e = parseFloat(east) * 1000, n = parseFloat(north) * 1000) => {
     if (!Number.isFinite(e) || !Number.isFinite(n)) { setNote("Type the motion as numbers, for example 2.5 and -1."); return; }
     setBusy("stack");
-    later(() => { try { finish(base(), e, n); } finally { setBusy(""); } });
+    const token = cancel.current;
+    later(() => { if (token.cancelled) return; try { finish(base(), e, n); } catch { setNote("The dates could not be stacked. Try another set of dates."); } finally { setBusy(""); } });
   };
   const useCatalogue = () => {
     if (!catalogPm) return;
@@ -128,14 +131,15 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
   };
   const runFind = () => {
     setBusy("find");
-    later(() => { try { setCands(findMovers(norms, ms, fovArcmin, { ...sel, maxRateArcsecYr: Math.max(20, maxRate) })); setShown(-1); } finally { setBusy(""); } });
+    const token = cancel.current;
+    later(() => { if (token.cancelled) return; try { setCands(findMovers(norms, ms, fovArcmin, { ...sel, maxRateArcsecYr: FINDER_MAX_RATE })); setShown(-1); } catch { setNote("The mover search could not finish. Try another set of dates."); } finally { setBusy(""); } });
   };
   const runTest = () => {
     setBusy("test"); setProgress("");
     const token = cancel.current;
     later(async () => {
       try {
-        const s = await scoreFinder(norms, ms, fovArcmin, 30, { ...sel, maxRateArcsecYr: Math.max(20, maxRate), signal: token, onProgress: (d, t) => setProgress(`${d} of ${t}`) });
+        const s = await scoreFinder(norms, ms, fovArcmin, 30, { ...sel, maxRateArcsecYr: FINDER_MAX_RATE, signal: token, onProgress: (d, t) => setProgress(`${d} of ${t}`) });
         if (!token.cancelled) setScore(s);
       } finally { if (!token.cancelled) { setBusy(""); setProgress(""); } }
     });
@@ -158,6 +162,7 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
     <section data-testid="motionlab">
       <h2 className="h">Find something that moves</h2>
       <p className="dim small">A faint object that drifts across the sky is hard to see on any one date. These two tools use all the dates together.</p>
+      {!!busy && <button type="button" className="btn small" data-testid="motion-cancel" onClick={() => { cancel.current.cancelled = true; cancel.current = { cancelled: false }; setBusy(""); setProgress(""); setNote("Computation cancelled."); }}>Cancel computation</button>}
       {surveys.length > 1 && (
         <label className="field">Which dates to use
           <select value={which === "auto" ? include[0] : which} onChange={(e) => setWhich(e.target.value)} data-testid="ml-dates">
@@ -168,52 +173,8 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
       {!enough && <p className="dim small" role="status">This needs at least three loaded dates{usedText ? ` from ${usedText}` : ""}. {idx.length} loaded so far.</p>}
 
       <div className={css.part}>
-        <h3 className={css.sub}>Stack along a motion</h3>
-        <p className="dim small">Slide every date back along a motion you choose, then add them up. Something moving that way lands on the same spot each time and gets brighter; stars that stay put smear out.</p>
-        <div className={css.pair}>
-          <label className="field">Moves east, arcseconds per year
-            <input className={css.num} type="number" step="0.1" value={east} onChange={(e) => setEast(e.target.value)} data-testid="sa-east" /></label>
-          <label className="field">Moves north, arcseconds per year
-            <input className={css.num} type="number" step="0.1" value={north} onChange={(e) => setNorth(e.target.value)} data-testid="sa-north" /></label>
-        </div>
-        <p className="dim small">Use negative numbers for west or south.</p>
-        <label className="check"><input type="checkbox" checked={clean} onChange={(e) => setClean(e.target.checked)} data-testid="sa-clean" /> Remove everything that stays put first</label>
-        <div className={css.row}>
-          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={() => runStack()} data-testid="sa-run">Stack the dates</button>
-          {catalogPm && <button type="button" className="btn small" disabled={!enough || !!busy} onClick={useCatalogue} data-testid="sa-catalog">Use this target&apos;s catalogue motion</button>}
-        </div>
-        <label className="field" style={{ marginTop: 16 }}>Fastest motion to try when searching
-          <select value={maxRate} onChange={(e) => setMaxRate(+e.target.value)} data-testid="sa-maxrate">
-            {[2, 5, 10, 20].map((r) => <option key={r} value={r}>{r} arcseconds per year</option>)}
-          </select></label>
-        <button type="button" className="btn small" style={{ marginTop: 0 }} disabled={!enough || !!busy || !picked} onClick={runSearch} data-testid="sa-search">Find the best motion at the spot I clicked</button>
-        {!picked && <p className="dim small">Click a spot in the main picture first.</p>}
-        {(busy === "stack" || busy === "search") && <p className="dim small" role="status"><i className="spin" /> {busy === "search" ? `Trying thousands of motions${progress ? `, ${progress}` : ""}.` : "Stacking."}</p>}
-        {note && <p className="alert warn" role="status">{note}</p>}
-        <div className={css.stack} hidden={!res}>
-          <canvas ref={cv} width={64} height={64} data-testid="sa-canvas" aria-label="The dates stacked along the chosen motion" />
-          {res && <i className={css.ring} style={{ left: `${((res.peak.x + 0.5) / w) * 100}%`, top: `${((res.peak.y + 0.5) / w) * 100}%` }} aria-hidden />}
-        </div>
-        {res && (
-          <div className={css.result} data-testid="sa-result">
-            <p className="small">
-              {res.search ? "Best motion found: " : "Stacked at "}
-              <span className={css.num2}>{rateText(Math.hypot(res.east, res.north) / 1000)}</span> per year{Math.hypot(res.east, res.north) > 0 ? ` heading ${compass(res.east, res.north)}` : " (no motion)"}.
-              The brightest spot {res.search ? "near your click" : "in the stack"} (ringed) stands <span className={css.num2}>{res.peak.value.toFixed(1)}</span> times above the noise, from {res.stack.used} {usedText} dates.
-              {Number.isFinite(res.still) && Math.hypot(res.east, res.north) > 0 && <> Stacked without any motion, the same spot reaches <span className={css.num2}>{res.still.toFixed(1)}</span>.</>}
-            </p>
-            <p className="dim small">
-              {res.search
-                ? `${res.search.tried.toLocaleString("en")} motions were tried, so chance alone can reach about 5. Trust it only if it is well above that.`
-                : "Below about 5 is what noise alone can do."} The stack shows the sky as on {refDate}; north is up, east is left.
-            </p>
-          </div>
-        )}
-      </div>
-
-      <div className={css.part}>
         <h3 className={css.sub}>Look for movers automatically</h3>
-        <p className="dim small">The computer removes everything that stays put, keeps the spots left over on each date, and reports any that line up along a straight path at a steady speed on at least three dates.</p>
+        <p className="dim small">The computer removes everything that stays put, keeps the spots left over on each date, and reports any that line up along a straight path at a steady speed on at least three dates. It searches motions up to {FINDER_MAX_RATE} arcseconds per year.</p>
         <div className={css.row}>
           <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runFind} data-testid="fm-run">Look for movers</button>
           <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runTest} data-testid="fm-test">Test the finder</button>
@@ -246,6 +207,50 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
           </div>
         )}
       </div>
+      <div className={css.part}>
+        <h3 className={css.sub}>Stack along a motion</h3>
+        <p className="dim small">Slide every date back along a motion you choose, then add them up. Something moving that way lands on the same spot each time and gets brighter; stars that stay put smear out.</p>
+        <div className={css.pair}>
+          <label className="field">Moves east, arcseconds per year
+            <input className={css.num} type="number" step="0.1" value={east} onChange={(e) => setEast(e.target.value)} data-testid="sa-east" /></label>
+          <label className="field">Moves north, arcseconds per year
+            <input className={css.num} type="number" step="0.1" value={north} onChange={(e) => setNorth(e.target.value)} data-testid="sa-north" /></label>
+        </div>
+        <p className="dim small">Use negative numbers for west or south.</p>
+        <label className="check"><input type="checkbox" checked={clean} onChange={(e) => setClean(e.target.checked)} data-testid="sa-clean" /> Remove everything that stays put first</label>
+        <div className={css.row}>
+          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={() => runStack()} data-testid="sa-run">Stack the dates</button>
+          {catalogPm && <button type="button" className="btn small" disabled={!enough || !!busy} onClick={useCatalogue} data-testid="sa-catalog">Use this target&apos;s catalogue motion</button>}
+        </div>
+        <label className="field" style={{ marginTop: 16 }}>Fastest motion to try when searching
+          <select value={maxRate} onChange={(e) => setMaxRate(+e.target.value)} data-testid="sa-maxrate">
+            {[2, 5, 10, 20].map((r) => <option key={r} value={r}>{r} arcseconds per year</option>)}
+          </select></label>
+        <button type="button" className="btn small" style={{ marginTop: 0 }} disabled={!enough || !!busy || !picked} onClick={runSearch} data-testid="sa-search">Find the best motion at the spot I clicked</button>
+        {!picked && <p className="dim small">Click a spot in the main picture first.</p>}
+        {(busy === "stack" || busy === "search") && <p className="dim small" role="status"><i className="spin" /> {busy === "search" ? `Trying thousands of motions${progress ? `, ${progress}` : ""}.` : "Stacking."}</p>}
+        {note && <p className="alert warn" role="status">{note}</p>}
+        <div className={css.stack} hidden={!res}>
+          <canvas ref={cv} width={64} height={64} role="img" data-testid="sa-canvas" aria-label="The dates stacked along the chosen motion; measurements are given below" />
+          {res && <i className={css.ring} style={{ left: `${((res.peak.x + 0.5) / w) * 100}%`, top: `${((res.peak.y + 0.5) / w) * 100}%` }} aria-hidden />}
+        </div>
+        {res && (
+          <div className={css.result} data-testid="sa-result" role="status">
+            <p className="small">
+              {res.search ? "Best motion found: " : "Stacked at "}
+              <span className={css.num2}>{rateText(Math.hypot(res.east, res.north) / 1000)}</span> per year{Math.hypot(res.east, res.north) > 0 ? ` heading ${compass(res.east, res.north)}` : " (no motion)"}.
+              The brightest spot {res.search ? "near your click" : "in the stack"} (ringed) stands <span className={css.num2}>{res.peak.value.toFixed(1)}</span> times above the noise, from {res.stack.used} {usedText} dates.
+              {Number.isFinite(res.still) && Math.hypot(res.east, res.north) > 0 && <> Stacked without any motion, the same spot reaches <span className={css.num2}>{res.still.toFixed(1)}</span>.</>}
+            </p>
+            <p className="dim small">
+              {res.search
+                ? `${res.search.tried.toLocaleString("en")} motions were tried, so chance alone can reach about 5. Trust it only if it is well above that.`
+                : "Below about 5 is what noise alone can do."} The stack shows the sky as on {refDate}; north is up, east is left.
+            </p>
+          </div>
+        )}
+      </div>
+
     </section>
   );
 }

@@ -1,0 +1,29 @@
+
+> spherex-drift-web@0.1.0 build
+> next build
+
+   ▲ Next.js 15.5.4
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 2.8s
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/4) ...
+   Generating static pages (1/4) 
+   Generating static pages (2/4) 
+   Generating static pages (3/4) 
+ ✓ Generating static pages (4/4)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                 Size  First Load JS
+┌ ○ /                                    45.5 kB         147 kB
+└ ○ /_not-found                            989 B         103 kB
++ First Load JS shared by all             102 kB
+  ├ chunks/098d5085-ecb8e8a6abd238e2.js  54.2 kB
+  ├ chunks/820-6cc6c4b53367683c.js       45.4 kB
+  └ other shared chunks (total)          1.94 kB
+
+
+○  (Static)  prerendered as static content
+

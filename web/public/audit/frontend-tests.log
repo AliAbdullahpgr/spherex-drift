@@ -1,0 +1,33 @@
+
+> spherex-drift-web@0.1.0 test
+> vitest run
+
+
+ RUN  v3.2.4 /root/spherex-drift/web
+
+stdout | lib/detect.test.ts > findMovers > is fast enough for 256 x 256 x 30 dates, and scoreFinder gives an honest tally
+findMovers 256x256x30: 703 ms; scoreFinder 829 ms per run; bright 3/4, medium 4/4, faint 4/4; false alarms 0, spurious 0
+
+ ✓ lib/detect.test.ts (6 tests) 14092ms
+   ✓ findMovers > finds the mover first, with the right speed and direction, and nothing on fixed stars  640ms
+   ✓ findMovers > reports nothing when nothing moves  318ms
+   ✓ findMovers > is fast enough for 256 x 256 x 30 dates, and scoreFinder gives an honest tally  12850ms
+stdout | lib/shiftadd.test.ts > searchMotion > recovers the motion of a faint mover from a click near it
+searchMotion 128x128x12: 455 ms, 5025 motions, snr 18.1
+
+ ✓ lib/shiftadd.test.ts (7 tests) 1822ms
+   ✓ shiftAndAdd > a faint mover adds up at its true motion, not at zero motion or on any single date  471ms
+   ✓ shiftAndAdd > removing what stays put leaves the mover as the brightest thing despite bright stars  361ms
+   ✓ searchMotion > recovers the motion of a faint mover from a click near it  582ms
+ ✓ lib/api.test.ts (3 tests) 31ms
+ ✓ lib/coords.test.ts (15 tests) 83ms
+ ✓ lib/overlays.test.ts (4 tests) 53ms
+ ✓ lib/mock.test.ts (2 tests) 437ms
+   ✓ labelled demonstration data > keeps the demo mover detectable across the WISE dates  421ms
+ ✓ lib/urlstate.test.ts (9 tests) 10ms
+
+ Test Files  7 passed (7)
+      Tests  46 passed (46)
+   Start at  07:18:18
+   Duration  27.12s (transform 1.42s, setup 0ms, collect 1.93s, tests 16.53s, environment 2ms, prepare 2.78s)
+

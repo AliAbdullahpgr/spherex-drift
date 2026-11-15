@@ -17,6 +17,7 @@ export type SkyOverlayProps = {
   showGaia: boolean;
   showMotion: boolean;
   showKnown: boolean;
+  invert?: boolean;
 };
 
 const YEAR_MS = 365.25 * 86400000;
@@ -25,7 +26,7 @@ const inside = (p: { x: number; y: number }, m = 0) => p.x >= -m && p.x <= 1 + m
 const f = (n: number) => +(n * 100).toFixed(3);
 
 /** SVG layer for the square sky image (north up, east left). Put it inside the image's positioned box. */
-export default function SkyOverlay({ view, epochMs, spanMs, gaia = [], known = [], showGaia, showMotion, showKnown }: SkyOverlayProps) {
+export default function SkyOverlay({ view, epochMs, spanMs, gaia = [], known = [], showGaia, showMotion, showKnown, invert = false }: SkyOverlayProps) {
   const { ra, dec, fov } = view;
   const span0 = spanMs?.[0] ?? epochMs, span1 = spanMs?.[1] ?? epochMs + YEAR_MS;
 
@@ -79,14 +80,14 @@ export default function SkyOverlay({ view, epochMs, spanMs, gaia = [], known = [
   return (
     <svg className={styles.layer} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden data-testid="sky-overlay">
       {rings.length > 0 && (
-        <g fill="none" stroke={GAIA_COLOR}>
+        <g fill="none" stroke={invert ? "#00536b" : GAIA_COLOR}>
           {rings.map((s) => (
             <circle key={s.id} cx={f(s.x)} cy={f(s.y)} r={s.r} strokeWidth={s.fast ? 1.6 : 1} strokeOpacity={s.fast ? 1 : 0.7} vectorEffect="non-scaling-stroke" data-testid="gaia-mark" />
           ))}
         </g>
       )}
       {arrows.length > 0 && (
-        <g fill="none" stroke={GAIA_COLOR} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <g fill="none" stroke={invert ? "#00536b" : GAIA_COLOR} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
           {arrows.map((a) => (
             <g key={a.id} data-testid="gaia-arrow">
               <line x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2} vectorEffect="non-scaling-stroke" />
@@ -97,7 +98,7 @@ export default function SkyOverlay({ view, epochMs, spanMs, gaia = [], known = [
       )}
       {marks.map((m) => (
         <g key={m.key} data-testid="known-mark">
-          <path d={`M${m.x} ${m.y - 2.4} L${m.x + 2.4} ${m.y} L${m.x} ${m.y + 2.4} L${m.x - 2.4} ${m.y} Z`} fill="none" stroke={KNOWN_COLOR} strokeWidth="1.6" strokeDasharray={m.rough ? "3 3" : undefined} vectorEffect="non-scaling-stroke" />
+          <path d={`M${m.x} ${m.y - 2.4} L${m.x + 2.4} ${m.y} L${m.x} ${m.y + 2.4} L${m.x - 2.4} ${m.y} Z`} fill="none" stroke={invert ? "#8c1455" : KNOWN_COLOR} strokeWidth="1.6" strokeDasharray={m.rough ? "3 3" : undefined} vectorEffect="non-scaling-stroke" />
           <text className={styles.label} x={m.flip ? m.x - 3.4 : m.x + 3.4} y={m.y + 0.9} textAnchor={m.flip ? "end" : "start"}>{m.name}</text>
         </g>
       ))}

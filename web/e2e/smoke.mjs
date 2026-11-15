@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 const require = createRequire(import.meta.url);
-const PW = process.env.PW_PATH || "/tmp/claude-0/-root/a8bcf302-aa8b-45ec-8621-86dfdbf2d5c2/scratchpad/pw/node_modules/playwright";
+const PW = process.env.PW_PATH || "playwright";
 const { chromium } = require(PW);
 const BASE = process.env.BASE || "http://localhost:3000";
 const MOCK = process.env.QUERY === undefined;
@@ -191,7 +191,7 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
   await page.waitForSelector('[data-testid=spectrum]', { timeout: 20000 });
   ok((await page.$$('[data-testid=spec-marker]')).length === 3, `${name}: spectrum has 3 line markers`);
   ok((await page.$$('[data-testid=spec-point]')).length > 10, `${name}: spectrum has points`);
-  await (await page.$('[data-testid=spectrum]')).scrollIntoViewIfNeeded();
+  await page.locator('[data-testid=spectrum]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${OUT}/${name}-spectrum.png`, fullPage: true });
   await noOverflow(page, `${name} spectrum`);
 

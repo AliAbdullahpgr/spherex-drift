@@ -23,17 +23,23 @@ export function readState(search: string): AppState {
   const mode = p.get("mode");
   const st = p.get("stretch");
   const ra = num(p.get("ra"), DEFAULTS.ra), dec = num(p.get("dec"), DEFAULTS.dec);
+  const detector = optNum(p.get("detector"));
+  const bp = Math.min(95, Math.max(0, num(p.get("bp"), DEFAULTS.bp)));
+  const wp = Math.min(100, Math.max(90, bp + 1, num(p.get("wp"), DEFAULTS.wp)));
+  const pass = (key: string) => { const value = optNum(p.get(key)); return value == null ? null : Math.max(1, Math.floor(value)); };
+  let pf = pass("pf"), pt = pass("pt");
+  if (pf != null && pt != null && pf > pt) [pf, pt] = [pt, pf];
   return {
     ra: ra >= 0 && ra < 360 ? ra : DEFAULTS.ra, dec: dec >= -90 && dec <= 90 ? dec : DEFAULTS.dec,
-    fov: Math.min(30, Math.max(0.5, num(p.get("fov"), DEFAULTS.fov))),
+    fov: Math.min(30, Math.max(1, num(p.get("fov"), DEFAULTS.fov))),
     mode: mode === "rainbow" || mode === "diff" ? mode : "blink",
     frame: Math.max(0, Math.floor(num(p.get("frame"), 0))),
-    det: optNum(p.get("detector")),
+    det: detector != null && Number.isInteger(detector) && detector >= 1 && detector <= 6 ? detector : null,
     stretch: st === "linear" || st === "log" ? st : "asinh",
-    bp: Math.min(99, Math.max(0, num(p.get("bp"), DEFAULTS.bp))), wp: Math.min(100, Math.max(50, num(p.get("wp"), DEFAULTS.wp))),
-    wise: p.get("wise") === "1", speed: Math.min(10, Math.max(0.25, num(p.get("speed"), DEFAULTS.speed))),
+    bp, wp,
+    wise: p.get("wise") === "1", speed: Math.min(6, Math.max(0.25, num(p.get("speed"), DEFAULTS.speed))),
     src: p.get("src") === "frame" ? "frame" : "stack",
-    a: optNum(p.get("a")), b: optNum(p.get("b")), pf: optNum(p.get("pf")), pt: optNum(p.get("pt")),
+    a: optNum(p.get("a")), b: optNum(p.get("b")), pf, pt,
     cross: p.get("cross") !== "0", mark: p.get("mark") !== "0", mock: p.get("mock") === "1", embed: p.get("embed") === "1", play: p.get("play") !== "0",
     sharp: p.get("sharp") !== "0", inv: p.get("inv") === "1",
     // links made before "each date minus the rest" existed carry a and b: keep them on the two-date view

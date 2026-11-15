@@ -1,0 +1,16 @@
+{
+  "feature_groups_passed": 51,
+  "feature_groups_failed": 0,
+  "frontend_unit_tests_passed": 46,
+  "backend_tests_passed": 26,
+  "backend_tests_skipped": 5,
+  "playwright_smoke_assertions_passed": 99,
+  "real_workflow_checks": "passed",
+  "production_browser": "passed: real data, 26 images, same-origin API, zero page errors",
+  "automated_accessibility": "no WCAG 2.1 AA violations in the scanned states",
+  "additional_accessibility_checks": [
+    "Inverted-sky markers and keyboard selection remain visible",
+    "Expanded quality explanations fit the 320px phone viewport"
+  ],
+  "scope": "Chromium browser checks, keyboard/touch/reflow tests and automated accessibility; manual NVDA/VoiceOver and other browser engines were not tested."
+}

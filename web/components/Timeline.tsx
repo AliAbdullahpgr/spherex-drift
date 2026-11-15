@@ -25,6 +25,7 @@ export default function Timeline({ epochs, marks, onSelect }: { epochs: Epoch[];
           <button
             key={e.key} className={`mark ${e.survey} ${marks[i]}`} style={{ left: `${pos(e.ms)}%` }}
             title={`${e.label} · ${fmtDate(e.ms)} · ${e.wl.toFixed(2)} µm`} aria-label={`${e.label}, ${fmtDate(e.ms)}`}
+            aria-pressed={marks[i] !== "none"}
             onClick={() => onSelect(i)}
           >{marks[i] === "a" ? "A" : marks[i] === "b" ? "B" : ""}</button>
         ))}
