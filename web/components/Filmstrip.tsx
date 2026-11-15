@@ -23,16 +23,17 @@ function Thumb({ image }: { image: ImageData | null }) {
 }
 
 /** One thumbnail per date, oldest first. The honest-spacing ruler lives in Timeline. */
-export default function Filmstrip({ epochs, thumbs, marks, onSelect }: { epochs: Epoch[]; thumbs: (ImageData | null)[]; marks: Mark[]; onSelect: (i: number) => void }) {
+export default function Filmstrip({ epochs, thumbs, marks, onSelect, visible = true }: { epochs: Epoch[]; thumbs: (ImageData | null)[]; marks: Mark[]; onSelect: (i: number) => void; visible?: boolean }) {
   const wrap = useRef<HTMLDivElement>(null);
   const active = marks.findIndex((m) => m === "active");
   useEffect(() => {
+    if (!visible) return;
     const el = wrap.current?.querySelector<HTMLElement>(".cellfilm.active");
     const box = wrap.current;
     if (!el || !box) return;
     const l = el.offsetLeft, r = l + el.offsetWidth;
     if (l < box.scrollLeft || r > box.scrollLeft + box.clientWidth) box.scrollTo({ left: l - box.clientWidth / 2 + el.offsetWidth / 2, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
-  }, [active]);
+  }, [active, visible]);
   if (!epochs.length) return null;
   return (
     <div className="film" ref={wrap} data-testid="filmstrip" role="group" aria-label="Every date, oldest first">

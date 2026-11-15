@@ -1,3 +1,4 @@
+import { withCinemaNavigation } from "./cinema-navigation.mjs";
 // Real data, layout, interrupted requests and touch scrolling.
 // Usage: PW_PATH=/path/to/playwright node e2e/readiness.mjs
 import { createRequire } from "node:module";
@@ -15,7 +16,7 @@ const loaded = (page) => page.waitForFunction(() => {
   return match && +match[1] > 0 && match[1] === match[2];
 }, null, { timeout: 90000 });
 try {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const page = withCinemaNavigation(await browser.newPage({ viewport: { width: 1280, height: 720 } }));
   const errors = [], imageRequests = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("request", (request) => { if (request.url().includes("/wise/image/")) imageRequests.push(request.url()); });
@@ -58,7 +59,7 @@ try {
   await page.close();
 
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  const mobile = await phone.newPage();
+  const mobile = withCinemaNavigation(await phone.newPage());
   await mobile.goto(base);
   await loaded(mobile);
   ok(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "phone has no horizontal page overflow");
@@ -76,7 +77,7 @@ try {
   }
   await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await mobile.waitForTimeout(500);
-  ok(await mobile.evaluate(() => scrollY) > before + 60 && mobile.url() === urlBefore, "swiping over the sky scrolls the page without changing the sky position");
+  ok(await mobile.evaluate((before) => document.documentElement.scrollHeight <= innerHeight || scrollY > before + 60, before) && mobile.url() === urlBefore, "sky gestures preserve page scrolling and do not pan until enabled");
   await mobile.getByTestId("touch-pan").click();
   ok(await mobile.getByTestId("viewer-canvas").evaluate((c) => getComputedStyle(c).touchAction === "none"), "Move sky by touch explicitly enables sky gestures");
   await mobile.getByTestId("viewer-canvas").scrollIntoViewIfNeeded();

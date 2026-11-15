@@ -1,3 +1,4 @@
+import { withCinemaNavigation } from "./cinema-navigation.mjs";
 // Playwright smoke test. Usage: BASE=http://localhost:3000 node e2e/smoke.mjs [?query suffix]
 // Default runs in mock mode. For the real backend: QUERY="" BASE=... node e2e/smoke.mjs  (mover/colour asserts are skipped unless MOCK).
 import { createRequire } from "node:module";
@@ -46,7 +47,7 @@ const noOverflow = async (page, label) => {
 const browser = await chromium.launch();
 for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", { width: 390, height: 844 }]]) {
   const ctx = await browser.newContext({ viewport: vp, deviceScaleFactor: 1, hasTouch: name === "phone" });
-  const page = await ctx.newPage();
+  const page = withCinemaNavigation(await ctx.newPage());
   const errors = [];
   page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
   page.on("pageerror", (e) => errors.push("pageerror: " + e.message));

@@ -160,11 +160,11 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
 
   return (
     <section data-testid="motionlab">
-      <h2 className="h">Find something that moves</h2>
-      <p className="dim small">A faint object that drifts across the sky is hard to see on any one date. These two tools use all the dates together.</p>
-      {!!busy && <button type="button" className="btn small" data-testid="motion-cancel" onClick={() => { cancel.current.cancelled = true; cancel.current = { cancelled: false }; setBusy(""); setProgress(""); setNote("Computation cancelled."); }}>Cancel computation</button>}
+      <h2 className="h">Find motion</h2>
+      <p className="dim small">Combine dates to reveal motion.</p>
+      {!!busy && <button type="button" className="btn small" data-testid="motion-cancel" onClick={() => { cancel.current.cancelled = true; cancel.current = { cancelled: false }; setBusy(""); setProgress(""); setNote("Computation cancelled."); }}>Cancel</button>}
       {surveys.length > 1 && (
-        <label className="field">Which dates to use
+        <label className="field">Dates
           <select value={which === "auto" ? include[0] : which} onChange={(e) => setWhich(e.target.value)} data-testid="ml-dates">
             {surveys.map((g) => <option key={g} value={g}>{SURVEY[g] ?? g} only ({loadedBy[g]} dates)</option>)}
             <option value="all">Both together</option>
@@ -173,11 +173,11 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
       {!enough && <p className="dim small" role="status">This needs at least three loaded dates{usedText ? ` from ${usedText}` : ""}. {idx.length} loaded so far.</p>}
 
       <div className={css.part}>
-        <h3 className={css.sub}>Look for movers automatically</h3>
-        <p className="dim small">The computer removes everything that stays put, keeps the spots left over on each date, and reports any that line up along a straight path at a steady speed on at least three dates. It searches motions up to {FINDER_MAX_RATE} arcseconds per year.</p>
+        <h3 className={css.sub}>Automatic detection</h3>
+        <p className="dim small">Straight-line tracks across ≥3 dates. Up to {FINDER_MAX_RATE} ″/year.</p>
         <div className={css.row}>
-          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runFind} data-testid="fm-run">Look for movers</button>
-          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runTest} data-testid="fm-test">Test the finder</button>
+          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runFind} data-testid="fm-run">Find movers</button>
+          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={runTest} data-testid="fm-test">Evaluate</button>
         </div>
         {busy === "find" && <p className="dim small" role="status"><i className="spin" /> Looking.</p>}
         {busy === "test" && <p className="dim small" role="status"><i className="spin" /> Hiding simulated movers and looking for each one{progress ? `, ${progress}` : ""}.</p>}
@@ -193,7 +193,7 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
               ))}
             </ul>
           ))}
-        {cands && cands.length > 0 && <p className="dim small">Strongest first. A candidate is a lead to check by eye, not a discovery: picture defects and stars that change brightness can line up by chance.</p>}
+        {cands && cands.length > 0 && <p className="dim small">Candidates need visual confirmation.</p>}
         {score && (
           <div data-testid="fm-score" style={{ marginTop: 12 }}>
             <p className="small">
@@ -208,26 +208,26 @@ export default function MotionLab({ norms, epochs, fovArcmin, catalogPm, picked,
         )}
       </div>
       <div className={css.part}>
-        <h3 className={css.sub}>Stack along a motion</h3>
-        <p className="dim small">Slide every date back along a motion you choose, then add them up. Something moving that way lands on the same spot each time and gets brighter; stars that stay put smear out.</p>
+        <h3 className={css.sub}>Shift + stack</h3>
+        <p className="dim small">Align dates along a trial motion.</p>
         <div className={css.pair}>
-          <label className="field">Moves east, arcseconds per year
+          <label className="field">East · ″/year
             <input className={css.num} type="number" step="0.1" value={east} onChange={(e) => setEast(e.target.value)} data-testid="sa-east" /></label>
-          <label className="field">Moves north, arcseconds per year
+          <label className="field">North · ″/year
             <input className={css.num} type="number" step="0.1" value={north} onChange={(e) => setNorth(e.target.value)} data-testid="sa-north" /></label>
         </div>
-        <p className="dim small">Use negative numbers for west or south.</p>
-        <label className="check"><input type="checkbox" checked={clean} onChange={(e) => setClean(e.target.checked)} data-testid="sa-clean" /> Remove everything that stays put first</label>
+        <p className="dim small">Negative = west / south.</p>
+        <label className="check"><input type="checkbox" checked={clean} onChange={(e) => setClean(e.target.checked)} data-testid="sa-clean" /> Remove static background</label>
         <div className={css.row}>
-          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={() => runStack()} data-testid="sa-run">Stack the dates</button>
-          {catalogPm && <button type="button" className="btn small" disabled={!enough || !!busy} onClick={useCatalogue} data-testid="sa-catalog">Use this target&apos;s catalogue motion</button>}
+          <button type="button" className="btn small" disabled={!enough || !!busy} onClick={() => runStack()} data-testid="sa-run">Stack</button>
+          {catalogPm && <button type="button" className="btn small" disabled={!enough || !!busy} onClick={useCatalogue} data-testid="sa-catalog">Use catalogue</button>}
         </div>
-        <label className="field" style={{ marginTop: 16 }}>Fastest motion to try when searching
+        <label className="field" style={{ marginTop: 16 }}>Search limit
           <select value={maxRate} onChange={(e) => setMaxRate(+e.target.value)} data-testid="sa-maxrate">
             {[2, 5, 10, 20].map((r) => <option key={r} value={r}>{r} arcseconds per year</option>)}
           </select></label>
-        <button type="button" className="btn small" style={{ marginTop: 0 }} disabled={!enough || !!busy || !picked} onClick={runSearch} data-testid="sa-search">Find the best motion at the spot I clicked</button>
-        {!picked && <p className="dim small">Click a spot in the main picture first.</p>}
+        <button type="button" className="btn small" style={{ marginTop: 0 }} disabled={!enough || !!busy || !picked} onClick={runSearch} data-testid="sa-search">Search selected point</button>
+        {!picked && <p className="dim small">Select a point in the image first.</p>}
         {(busy === "stack" || busy === "search") && <p className="dim small" role="status"><i className="spin" /> {busy === "search" ? `Trying thousands of motions${progress ? `, ${progress}` : ""}.` : "Stacking."}</p>}
         {note && <p className="alert warn" role="status">{note}</p>}
         <div className={css.stack} hidden={!res}>

@@ -1,5 +1,5 @@
 "use client";
-// "Could you spot a Planet X?" Controls only: the parent keeps the value and does the hiding
+// "Inject an object" Controls only: the parent keeps the value and does the hiding
 // (see hideObject in lib/planetx.ts).
 import { apparentMotion, type PlanetXValue } from "@/lib/planetx";
 import { useState } from "react";
@@ -38,25 +38,25 @@ export default function PlanetXPanel({ value: v, onChange, epochsCount, spanYear
 
   return (
     <section data-testid="planetx-panel">
-      <h2 className="h">Could you spot a Planet X?</h2>
-      <p className="dim small">Hide a simulated object in these real images, then try to find it. Nothing like it has been found; this tests whether the pictures could show one.</p>
-      <label className="check"><input type="checkbox" checked={v.on} onChange={(e) => onChange({ ...v, on: e.target.checked, reveal: false, seed: e.target.checked ? newSeed() : v.seed })} data-testid="px-toggle" /> Hide a simulated object</label>
+      <h2 className="h">Inject an object</h2>
+      <p className="dim small">Add a simulated object to the real sky.</p>
+      <label className="check"><input type="checkbox" checked={v.on} onChange={(e) => onChange({ ...v, on: e.target.checked, reveal: false, seed: e.target.checked ? newSeed() : v.seed })} data-testid="px-toggle" /> Enable simulation</label>
       {v.on && (
         <div className="pxbox">
           <div className="seg" role="group" aria-label="How to describe the object">
-            <button type="button" className={`segbtn ${v.kind === "distance" ? "on" : ""}`} aria-pressed={v.kind === "distance"} onClick={() => set({ kind: "distance" })} data-testid="px-kind-distance">A planet at a set distance</button>
-            <button type="button" className={`segbtn ${v.kind === "custom" ? "on" : ""}`} aria-pressed={v.kind === "custom"} onClick={() => set({ kind: "custom" })} data-testid="px-kind-custom">My own motion</button>
+            <button type="button" className={`segbtn ${v.kind === "distance" ? "on" : ""}`} aria-pressed={v.kind === "distance"} onClick={() => set({ kind: "distance" })} data-testid="px-kind-distance">Distance</button>
+            <button type="button" className={`segbtn ${v.kind === "custom" ? "on" : ""}`} aria-pressed={v.kind === "custom"} onClick={() => set({ kind: "custom" })} data-testid="px-kind-custom">Linear motion</button>
           </div>
           {v.kind === "distance" ? (
             <label className="field">Distance from the Sun
               <select value={v.dist} onChange={(e) => set({ dist: +e.target.value })} data-testid="px-dist">
-                {[500, 2000, 5000, 20000].map((d) => <option key={d} value={d}>{d.toLocaleString("en")} times the Earth-Sun distance</option>)}
+                {[500, 2000, 5000, 20000].map((d) => <option key={d} value={d}>{d.toLocaleString("en")} AU</option>)}
               </select></label>
           ) : (
             <div className={css.pair}>
-              <label className="field">Moves east, arcseconds per year
+              <label className="field">East · ″/year
                 <input className={css.num} type="number" min="-60" max="60" step="0.1" value={eastDraft} onChange={(e) => { setEastDraft(e.target.value); if (e.target.value !== "" && Number.isFinite(+e.target.value)) set({ pmEast: num(e.target.value) }); }} onBlur={(e) => { const value = num(e.target.value); setEastDraft(String(value)); set({ pmEast: value }); }} data-testid="px-pm-east" /></label>
-              <label className="field">Moves north, arcseconds per year
+              <label className="field">North · ″/year
                 <input className={css.num} type="number" min="-60" max="60" step="0.1" value={northDraft} onChange={(e) => { setNorthDraft(e.target.value); if (e.target.value !== "" && Number.isFinite(+e.target.value)) set({ pmNorth: num(e.target.value) }); }} onBlur={(e) => { const value = num(e.target.value); setNorthDraft(String(value)); set({ pmNorth: value }); }} data-testid="px-pm-north" /></label>
             </div>
           )}
@@ -77,8 +77,8 @@ export default function PlanetXPanel({ value: v, onChange, epochsCount, spanYear
             </p>
           )}
           <div className="row">
-            <button type="button" className="btn small" onClick={() => onChange({ ...v, reveal: !v.reveal })} data-testid="px-reveal">{v.reveal ? "Hide the answer" : "Show where it is"}</button>
-            <button type="button" className="btn small" onClick={() => set({ seed: newSeed() })} data-testid="px-move">Hide it somewhere else</button>
+            <button type="button" className="btn small" onClick={() => onChange({ ...v, reveal: !v.reveal })} data-testid="px-reveal">{v.reveal ? "Hide marker" : "Reveal"}</button>
+            <button type="button" className="btn small" onClick={() => set({ seed: newSeed() })} data-testid="px-move">New position</button>
           </div>
         </div>
       )}

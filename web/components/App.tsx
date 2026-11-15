@@ -11,6 +11,8 @@ import PlanetXPanel from "./PlanetXPanel";
 import { DEFAULTS, readState, writeState, type AppState, type Mode } from "@/lib/urlstate";
 import type { Frame, SpectrumPoint, Target } from "@/lib/types";
 import Viewer, { Readout } from "./Viewer";
+import Icon from "./Icon";
+import Inspector, { type InspectorPanel } from "./Inspector";
 import Timeline, { type Mark } from "./Timeline";
 import Pad from "./Pad";
 import Spectrum from "./Spectrum";
@@ -30,13 +32,24 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [backend, setBackend] = useState<{ mock: boolean; reason?: string } | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
-  const [targetInfoOpen, setTargetInfoOpen] = useState(true);
+  const [desktopControls, setDesktopControls] = useState(false);
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 860px)");
-    const sync = () => setTargetInfoOpen(!media.matches);
-    sync();
-    media.addEventListener("change", sync);
+    const media = window.matchMedia("(min-width: 1180px)");
+    const sync = () => setDesktopControls(media.matches);
+    sync(); media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
+  }, []);
+  const [panel, setPanel] = useState<InspectorPanel | null>(null);
+  const [analysisTab, setAnalysisTab] = useState("motion");
+  const [showFrames, setShowFrames] = useState(false);
+  const [loop, setLoop] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [fullscreenError, setFullscreenError] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const sync = () => setFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
   }, []);
   const [spx, setSpx] = useState<Frame[]>([]);
   const [wise, setWise] = useState<Frame[]>([]);
@@ -257,6 +270,7 @@ export default function App() {
       const { avail: av, fi: at, frames: fr } = live.current;
       let hold = 1;
       if (av.length >= 2) {
+        if (!loop && at === av[av.length - 1]) { setPlaying(false); return; }
         const nxt = av.find((k) => k > at) ?? av[0];
         if (nxt < at) setLoopTick((v) => v + 1);
         setS((o) => ({ ...o, frame: fr[nxt].idx }));
@@ -266,7 +280,7 @@ export default function App() {
     };
     t = setTimeout(tick, 1000 / s.speed);
     return () => clearTimeout(t);
-  }, [playing, animated, s.speed]);
+  }, [playing, animated, s.speed, loop]);
   const step = (d: number) => { if (frames.length < 2) return; setPlaying(false); set({ frame: frames[(fi + d + frames.length) % frames.length].idx }); };
 
   // ---- each date minus the rest: worked out one frame at a time and kept, so the loop is cheap after the first pass
@@ -335,6 +349,10 @@ export default function App() {
 
   // ---- known target under the crosshair, and where its catalogued motion says it should be
   const target = useMemo(() => targets.find((t) => Math.hypot((t.ra - s.ra) * Math.cos((s.dec * Math.PI) / 180), t.dec - s.dec) * 3600 < 2) ?? null, [targets, s.ra, s.dec]);
+  useEffect(() => {
+    if (!target) return;
+    document.querySelector(`[data-testid="target-${target.id}"]`)?.scrollIntoView({ block: "nearest", inline: "center", behavior: "auto" });
+  }, [target?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const expected = useMemo(() => {
     if (!target?.pm_mas_yr || target.epoch == null) return null;
     const [pmRa, pmDec] = target.pm_mas_yr;
@@ -404,15 +422,15 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || el?.closest("input,select,textarea,button,a,summary,[contenteditable=true],.data-table")) return;
+      if (document.querySelector("dialog[open]") || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || el?.closest("input,select,textarea,button,a,summary,[contenteditable=true],.data-table")) return;
       if (!animated || frames.length < 2) return;
-      if (e.key === " ") { e.preventDefault(); setPlaying((v) => !v); }
+      if (e.key === " ") { e.preventDefault(); if (!e.repeat) togglePlayback(); }
       else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [animated, frames, fi]); // eslint-disable-line
+  }, [animated, frames, fi, playing, loop]); // eslint-disable-line
 
   // ---- actions
   const jump = (ra: number, dec: number, label: string | undefined, extra: Partial<AppState> = {}) => {
@@ -426,6 +444,7 @@ export default function App() {
     const r = resolveInput(text, targets);
     if (r.ok) {
       const t = targets.find((x) => x.name === r.label);
+      if (t) setAnalysisTab(t.kind === "variable" ? "brightness" : "motion");
       // movers need the long WISE baseline to show motion; variables are clearest as a blink
       jump(r.ra, r.dec, r.label, t?.kind === "mover" ? { wise: true } : t?.kind === "variable" ? { wise: false, mode: "blink" } : {});
       return;
@@ -514,32 +533,31 @@ export default function App() {
     else if (s.mode === "rainbow") pmPath = planet.track;
     else if (pair) allMarks = [...allMarks, ...[aIdx, bIdx].map((k) => ({ ...planet.track[k], label: "simulated", tone: "b" as const }))].filter(inView);
   }
-  const modeHelp: Record<Mode, string> = {
-    blink: "Flip between pictures of the same patch of sky taken months or years apart. Stars hold still. Anything that jumps is moving.",
-    rainbow: "Every date in one picture: the oldest is tinted blue, the newest orange. Stars add up to white. A mover leaves a coloured streak.",
-    diff: s.diff === "each"
-      ? "Each date with the other dates subtracted. Everything that holds still at the same brightness cancels to black. Only what moved or changed is left."
-      : "The newer picture minus the older one. Stars cancel out. A mover leaves a blue spot where it was and an orange spot where it is now.",
-  };
-  const modeName: Record<Mode, string> = { blink: "Blink", rainbow: "Rainbow trail", diff: "Difference" };
+  const modeName: Record<Mode, string> = { blink: "Blink", rainbow: "Trail", diff: "Difference" };
 
-  const modeSub: Record<Mode, string> = { blink: "flip between dates", rainbow: "all dates in one picture", diff: "only what moved or changed" };
   const spanYr = n > 1 ? (epochs[n - 1].ms - epochs[0].ms) / (365.25 * 86400000) : 0;
   const winMax = Math.max(0.5, Math.ceil(spanYr * 2) / 2);
 
+  const togglePlayback = () => {
+    if (!playing && !loop && fi === frames.length - 1 && frames.length) set({ frame: frames[0].idx });
+    setPlaying((value) => !value);
+  };
+  const analysisTabs = [{ id: "motion", label: "Motion" }, { id: "spectrum", label: "Spectrum" }, { id: "brightness", label: "Brightness" }, { id: "planet", label: "Simulate" }, { id: "context", label: "Context" }];
+
   return (
-    <div className={`app ${s.embed ? "embed" : ""}`}>
+    <div ref={root} className={`app cinema ${s.embed ? "embed" : ""} ${desktopControls && !s.embed ? "desktop-controls" : ""} ${backend?.mock ? "has-demo" : ""}`}>
       <a className="skip-link" href="#sky-panel">Skip to sky viewer</a>
-      {!s.embed && (
-        <header className="top">
-          <a className="wordmark" href="./" aria-label="SPHEREx Drift, start over">SPHEREx Drift</a>
-          <span className="topnote">Real NASA SPHEREx images, with WISE images back to 2010</span>
-        </header>
-      )}
+      {!s.embed && <header className="top">
+        <a className="wordmark" href="./" aria-label="SPHEREx Drift, start over">SPHEREx <span>DRIFT</span></a>
+        <div className="top-actions">
+          {!desktopControls && <><button type="button" className="toolbar-button" data-testid="open-view" aria-haspopup={desktopControls ? undefined : "dialog"} onClick={() => setPanel("view")}><Icon name="view" /><span>View</span></button>
+          <button type="button" className="toolbar-button" data-testid="open-analysis" aria-haspopup={desktopControls ? undefined : "dialog"} onClick={() => setPanel("analyze")}><Icon name="analyze" /><span>Analyze</span></button></>}
+          <button type="button" className="icon-button" aria-label="Field notes and help" aria-haspopup="dialog" onClick={() => setPanel("about")}><Icon name="help" /></button>
+        </div>
+      </header>}
       {backend?.mock && (
         <div className="banner" role="status" data-testid="mock-banner">
-          {backend.reason === "unreachable" ? "Backend not reachable, so this shows synthetic demo data: " : "Demo mode: "}
-          the sky is made up, with one moving star and one variable star.
+          {backend.reason === "unreachable" ? "Offline · synthetic sky" : "Demo · synthetic sky"}
           <button type="button" className="btn small" disabled={reconnecting} onClick={async () => {
             setReconnecting(true);
             try { const result = await api.detectBackend(false); setBackend(result); if (!result.mock) { setTargets(await api.getTargets()); set({ mock: false }); setReload((n) => n + 1); } }
@@ -547,59 +565,52 @@ export default function App() {
           }}>{reconnecting ? "Connecting…" : "Retry real data"}</button>
         </div>
       )}
-
-      <div className="shell">
-        {/* ---------------- left: where to look ---------------- */}
-        <nav className="rail left" aria-label="Where to look">
-          <section className="about" data-testid="about-target">
-            <h1 className="title">{target ? target.name : "Custom position"}</h1>
-            {target
-              ? <p className="lede">{target.kind === "variable" ? "A star whose brightness changes." : target.kind === "mover" ? "A nearby object that moves across the sky." : ""}{expected ? <> It moves <b>{expected.rate.toFixed(1)}″ per year</b>, heading {expected.dir}.</> : null}</p>
-              : <p className="lede coords">{fmtRA(s.ra)} {fmtDec(s.dec)}</p>}
-            {expected && (
-              <details className="target-info" open={targetInfoOpen} onToggle={(event) => setTargetInfoOpen(event.currentTarget.open)}>
-                <summary>Motion and measurements</summary>
-                <p className="note">The yellow ring marks where that motion puts it on each date.</p>
-                <p className="measured" data-testid="measured">
-                  {measured
-                    ? <>Measured in these images: <b>{measured.rate.toFixed(1)}″ per year</b>, heading {measured.dir}, from {measured.n} dates across {measured.spanYr.toFixed(1)} years. The catalogue says {expected.rate.toFixed(1)}″.</>
-                    : s.wise ? "Not enough clear detections yet to measure its motion from the pictures." : "Add the WISE images to measure its motion from the pictures."}
-                </p>
-                <label className="check"><input type="checkbox" checked={s.mark} onChange={(e) => set({ mark: e.target.checked })} data-testid="mark-toggle" /> Show expected position</label>
-              </details>
+      {!s.embed && <nav className="target-rail" aria-label="Choose a target">
+        <ul className="target-list" data-testid="targets">
+          {targets.map((item) => <li key={item.id}>
+            <button type="button" className={`target-card ${target?.id === item.id ? "active" : ""}`} aria-current={target?.id === item.id ? "true" : undefined} aria-label={`${item.name}, ${item.kind === "variable" ? "variable star" : "moving object"}`} onClick={() => { setInput(item.name); go(item.name); }} data-testid={`target-${item.id}`} title={item.note}>
+              <span className="target-name">{item.name}</span>
+              <span className="target-symbol"><Icon name={item.kind === "variable" ? "variable" : "motion"} /></span>
+            </button>
+          </li>)}
+        </ul>
+      </nav>}
+      <main className="stage" id="sky-panel" tabIndex={-1} aria-label="Sky viewer">
+        <h1 className="title sr-only">{target?.name ?? "Custom sky position"}</h1>
+        <div className="screen">
+          <Viewer
+            image={image} size={SIZE} fov={s.fov} ra={s.ra} dec={s.dec} crosshair={s.cross} busy={busy} picked={picked}
+            onHover={setHover} onPick={(point) => { setPlaying(false); pick(point); setAnalysisTab("spectrum"); setPanel("analyze"); }} caption={caption} marks={[...allMarks, ...lab.marks.map((m) => ({ ...m, tone: "b" as const }))]} path={lab.path.length > 1 ? lab.path : pmPath} hud={hud}
+            sharp={s.sharp && s.mode !== "rainbow"} invert={s.inv && s.mode !== "rainbow"} loopTick={animated ? loopTick : 0}
+            onRecentre={recentre} onZoom={zoom} loading={busy != null}
+          >
+            {(ov.gaia || ov.motion || ov.known) && s.mode !== "rainbow" && cur && (
+              <SkyOverlay view={view} epochMs={cur.ms} spanMs={epochs.length > 1 ? [epochs[0].ms, epochs[n - 1].ms] : undefined}
+                gaia={gaia} known={known} showGaia={ov.gaia} showMotion={ov.motion} showKnown={ov.known && cur.survey === "spherex" && cur.kind === "frame"} invert={s.inv} />
             )}
-            {target?.kind === "variable" && <p className="note">It stays in place. Watch it brighten and fade in Blink, or click it to compare its spectrum between passes.</p>}
-          </section>
+          </Viewer>
 
-          <form onSubmit={(e) => { e.preventDefault(); go(input); }} className="coordform">
-            <h2 className="h"><label htmlFor="coords">Go to a position</label></h2>
-            <div className="searchrow">
-              <input id="coords" data-testid="coord-input" aria-describedby="coordinate-feedback" aria-invalid={inputMsg?.kind === "err" || undefined} value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
-                placeholder="RA and Dec, or a target name" />
-              <button className="go" type="submit" data-testid="coord-go" disabled={resolving}>Go</button>
+          <div className="screen-topline">
+            <span className="screen-label">{s.mode === "rainbow" ? "ALL DATES" : s.mode === "diff" ? "DIFFERENCE" : srcName || "SKY ARCHIVE"}</span>
+            {px.on && <span className="simulation-tag" data-testid="px-note">Simulated object added</span>}
+          </div>
+          <div className={`coordinate-readout ${hover ? "has-point" : ""}`}><Readout hover={hover} value={hoverVal} /></div>
+          {framesState === "error" && <div className="screen-alert alert" data-testid="frames-error">{framesErr}<button type="button" className="btn small" onClick={() => setReload((value) => value + 1)} data-testid="frames-retry">Retry</button></div>}
+          {noCoverage && <div className="screen-alert alert" data-testid="no-coverage">No SPHEREx coverage. Choose another target.</div>}
+        </div>
+        <div className="player-dock" data-testid="transport">
+          <div className="seek-row">
+            <span className="seek-date">{epochs[0] ? fmtDate(epochs[0].ms).slice(0, 4) : "—"}</span>
+            <input type="range" className="seek" min="0" max={Math.max(0, frames.length - 1)} step="1" value={fi} disabled={!animated || frames.length < 2} aria-label="Seek observation date" aria-valuetext={`${fi + 1} of ${frames.length} dates${when ? `, ${when}` : ""}`} data-testid="seek" style={{ "--seek": `${frames.length > 1 ? fi / (frames.length - 1) * 100 : 0}%` } as React.CSSProperties} onChange={(event) => { setPlaying(false); const frame = frames[+event.target.value]; if (frame) set({ frame: frame.idx }); }} />
+            <span className="seek-date">{epochs[n - 1] ? fmtDate(epochs[n - 1].ms).slice(0, 4) : "—"}</span>
+          </div>
+          <div className="player-row">
+            <div className="playback-buttons">
+              <button type="button" className="icon-button" onClick={() => step(-1)} aria-label="Previous date" title="Previous date" disabled={!animated || frames.length < 2}><Icon name="previous" /></button>
+              <button type="button" className="play-button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause · Space" : "Play · Space"} data-testid="play" disabled={!animated || avail.length < 2}><Icon name={playing && animated ? "pause" : "play"} /></button>
+              <button type="button" className="icon-button" onClick={() => step(1)} aria-label="Next date" title="Next date" disabled={!animated || frames.length < 2}><Icon name="next" /></button>
+              <span className="count" data-testid="frame-count">{frames.length ? `${fi + 1} of ${frames.length}` : "—"}</span>
             </div>
-            <div className={`msg ${inputMsg?.kind ?? ""}`} id="coordinate-feedback" data-testid="coord-msg" role="status">{inputMsg?.text ?? `Now showing ${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
-            <p className="hint">Use decimal degrees, or a form like 08h55m10.8s -07d14m42s.</p>
-          </form>
-
-          <section>
-            <h2 className="h">Test targets</h2>
-            <ul className="cat" data-testid="targets">
-              {targets.map((t) => (
-                <li key={t.id}>
-                  <button className={`catrow ${target?.id === t.id ? "on" : ""}`} aria-current={target?.id === t.id ? "true" : undefined} onClick={() => { setInput(t.name); go(t.name); }} data-testid={`target-${t.id}`} title={t.note}>
-                    <span className="nm">{t.name}</span>
-                    <span className="tag">{t.kind === "variable" ? "changes" : t.kind === "mover" ? "moves" : ""}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <Walkthrough onApply={applyWalk} />
-        </nav>
-
-        {/* ---------------- centre: the picture ---------------- */}
-        <main className="stage" id="sky-panel" tabIndex={-1} aria-label="Sky viewer">
           <div className="tabs" role="tablist" aria-label="Sky image display mode">
             {(["blink", "rainbow", "diff"] as Mode[]).map((m) => (
               <button key={m} id={`tab-${m}`} role="tab" tabIndex={s.mode === m ? 0 : -1} aria-selected={s.mode === m} className={`tab ${s.mode === m ? "on" : ""}`} onClick={() => set({ mode: m })} onKeyDown={(event) => {
@@ -610,68 +621,31 @@ export default function App() {
                 set({ mode: modes[next] }); document.getElementById(`tab-${modes[next]}`)?.focus();
               }} data-testid={`mode-${m}`}>
                 <span className="tl">{modeName[m]}</span>
-                <span className="sub">{modeSub[m]}</span>
               </button>
             ))}
           </div>
 
-          <div className="viewer-actions">
-            {s.embed ? <h1 className="stage-title">{target?.name ?? "Custom position"}</h1> : <span>{target?.name ?? "Custom position"}</span>}
-            <a href="#motion-tools" className="btn small" data-testid="find-shortcut">Find movers</a>
-            <a href="#spectrum-tools" className="btn small">Spectrum</a>
-          </div>
-          {animated && (
-            <div className="transport" data-testid="transport">
-              <button className="btn sq" onClick={() => step(-1)} aria-label="Previous date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M10 3 5 8l5 5" /></svg></button>
-              <button className="btn solid play" onClick={() => setPlaying((p) => !p)} aria-label={playing ? "Pause" : "Play"} data-testid="play" disabled={avail.length < 2}>{playing
-                  ? <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4 3h3v10H4zM9 3h3v10H9z" /></svg><span>Pause</span></>
-                  : <><svg viewBox="0 0 16 16" aria-hidden className="fill"><path d="M4.5 2.5v11l9-5.5z" /></svg><span>Play</span></>}</button>
-              <button className="btn sq" onClick={() => step(1)} aria-label="Next date" disabled={frames.length < 2}><svg viewBox="0 0 16 16" aria-hidden><path d="M6 3l5 5-5 5" /></svg></button>
-              <span className="count" data-testid="frame-count">{frames.length ? `${fi + 1} of ${frames.length}` : ""}</span>
-              <label className="inline">Speed
-                <input type="range" min="0.25" max="6" step="0.25" value={s.speed} onChange={(e) => set({ speed: +e.target.value })} aria-label="Playback speed" data-testid="speed" />
-                <span className="mono">{s.speed}/s</span>
-              </label>
-              {cur && !many && listing === "done" && (cur.flags.length > 0
-                ? <details className="quality-flags"><summary className="badge warn" data-testid="flags">{cur.flags.length} quality {cur.flags.length === 1 ? "flag" : "flags"}</summary><ul>{cur.flags.map((flag) => <li key={flag}><b>{flag.replace(/_/g, " ")}</b>: {flagHelp(flag)}</li>)}</ul></details>
-                : <span className="badge ok" title="No quality flags near the centre">clean</span>)}
+
+            <div className="player-extras">
+              <select className="speed-select" value={s.speed} onChange={(event) => set({ speed: +event.target.value })} aria-label="Playback speed" data-testid="speed">{[...new Set([0.5, 1, 2, 3, 4, 6, s.speed])].sort((a, b) => a - b).map((rate) => <option key={rate} value={rate}>{rate / 2}×</option>)}</select>
+              <button type="button" className="icon-button" aria-label="Loop playback" title="Loop playback" aria-pressed={loop} data-testid="loop-toggle" onClick={() => setLoop((value) => !value)}><Icon name="loop" /></button>
+              <button type="button" className="icon-button" aria-label={showFrames ? "Hide frames" : "Show frames"} title="Browse frames" aria-pressed={showFrames} aria-expanded={showFrames} aria-controls="frame-browser" data-testid="frames-toggle" onClick={() => setShowFrames((value) => !value)}><Icon name="frames" /></button>
+              <button type="button" className="icon-button" aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"} title="Fullscreen" aria-pressed={fullscreen} data-testid="fullscreen" onClick={async () => { setFullscreenError(""); try { if (document.fullscreenElement) await document.exitFullscreen(); else await root.current?.requestFullscreen(); } catch { setFullscreenError("Fullscreen is unavailable in this browser or embed."); } }}><Icon name="expand" /></button>
             </div>
-          )}
-
-          {framesState === "error" && <div className="alert" data-testid="frames-error">Could not load the exposure list: {framesErr}<button type="button" className="btn small" onClick={() => setReload((n) => n + 1)} data-testid="frames-retry">Try again</button></div>}
-          {noCoverage && <div className="alert" data-testid="no-coverage">No SPHEREx exposures cover this position yet. Try one of the test targets, or a different position.</div>}
-
-          <Viewer
-            image={image} size={SIZE} fov={s.fov} ra={s.ra} dec={s.dec} crosshair={s.cross} busy={busy} picked={picked}
-            onHover={setHover} onPick={pick} caption={caption} marks={[...allMarks, ...lab.marks.map((m) => ({ ...m, tone: "b" as const }))]} path={lab.path.length > 1 ? lab.path : pmPath} hud={hud}
-            sharp={s.sharp && s.mode !== "rainbow"} invert={s.inv && s.mode !== "rainbow"} loopTick={animated ? loopTick : 0}
-            onRecentre={recentre} onZoom={zoom} loading={busy != null}
-          >
-            {(ov.gaia || ov.motion || ov.known) && s.mode !== "rainbow" && cur && (
-              <SkyOverlay view={view} epochMs={cur.ms} spanMs={epochs.length > 1 ? [epochs[0].ms, epochs[n - 1].ms] : undefined}
-                gaia={gaia} known={known} showGaia={ov.gaia} showMotion={ov.motion} showKnown={ov.known && cur.survey === "spherex" && cur.kind === "frame"} invert={s.inv} />
-            )}
-          </Viewer>
-          {px.on && <p className="simnote" data-testid="px-note">These pictures contain one simulated object. Everything else is real.</p>}
-          <div className="under">
-            <Readout hover={hover} value={hoverVal} />
-            <span className="caption" data-testid="caption">{caption}{s.mode === "blink" && cur ? `, ${cur.wl.toFixed(2)} µm` : ""}</span>
           </div>
-
-          <p className="explain">{modeHelp[s.mode]}</p>
-
+          <span className="sr-only" data-testid="caption">{caption}{cur ? `, ${cur.wl.toFixed(2)} µm` : ""}</span>
           {s.mode === "diff" && (
             <div className="diffctl" data-testid="diffctl">
               <div className="seg" role="group" aria-label="What to subtract">
-                <button className={`segbtn ${s.diff === "each" ? "on" : ""}`} aria-pressed={s.diff === "each"} onClick={() => set({ diff: "each" })} data-testid="diff-each">Each date minus the rest</button>
-                <button className={`segbtn ${s.diff === "pair" ? "on" : ""}`} aria-pressed={s.diff === "pair"} onClick={() => set({ diff: "pair" })} data-testid="diff-pair">Two dates</button>
+                <button className={`segbtn ${s.diff === "each" ? "on" : ""}`} aria-pressed={s.diff === "each"} onClick={() => set({ diff: "each" })} data-testid="diff-each">Isolate</button>
+                <button className={`segbtn ${s.diff === "pair" ? "on" : ""}`} aria-pressed={s.diff === "pair"} onClick={() => set({ diff: "pair" })} data-testid="diff-pair">Compare</button>
               </div>
               {pair && (
                 <>
                   <div className="diffpick">
-                    <label>Older picture (A, subtracted)
+                    <label>A · subtract
                       <select value={aIdx} onChange={(e) => set({ a: +e.target.value })} data-testid="diff-a">{epochs.map((e, i) => <option key={e.key} value={i}>{e.label} · {fmtDate(e.ms)} · {e.wl.toFixed(2)} µm</option>)}</select></label>
-                    <label>Newer picture (B)
+                    <label>B · compare
                       <select value={bIdx} onChange={(e) => set({ b: +e.target.value })} data-testid="diff-b">{epochs.map((e, i) => <option key={e.key} value={i}>{e.label} · {fmtDate(e.ms)} · {e.wl.toFixed(2)} µm</option>)}</select></label>
                   </div>
                   {epochs.length < 2 && <div className="alert">Need at least two epochs to subtract.</div>}
@@ -683,64 +657,64 @@ export default function App() {
               {!pair && (
                 <>
                   {cur && !rest.length && framesState === "done" && <div className="alert" data-testid="each-alone">This is the only {cur.survey === "wise" ? "WISE" : "SPHEREx"} date at this wavelength, so there is nothing to subtract from it.</div>}
-                  <p className="keyline" data-testid="each-key"><span className="sw orange" /> Brighter on this date than on the others <span className="sw blue" /> Fainter</p>
+                  <p className="keyline" data-testid="each-key"><span className="sw orange" /> Brighter <span className="sw blue" /> Fainter</p>
                 </>
               )}
             </div>
           )}
-          {animated && n > 1 && (
-            <div className="combine" data-testid="combine">
-              <label className="field">Combine dates within <span className="val">{s.win ? `${Math.min(s.win, winMax)} ${Math.min(s.win, winMax) === 1 ? "year" : "years"}` : "off, single dates"}</span>
-                <input type="range" min="0" max={winMax} step="0.5" value={Math.min(s.win, winMax)} onChange={(e) => set({ win: +e.target.value })} aria-label="Combine dates within this many years" data-testid="win" /></label>
-              <label className="check"><input type="checkbox" checked={s.ends} onChange={(e) => set({ ends: e.target.checked })} data-testid="ends" /> First and last dates only</label>
+
+          {s.mode === "rainbow" && <p className="mode-key" data-testid="rainbow-help"><span className="ramp" /> Old → new · white is unchanged</p>}
+          <div id="frame-browser" hidden={!showFrames} className="frame-browser">
+            <Filmstrip epochs={epochs} thumbs={thumbs} marks={marks} onSelect={selectEpoch} visible={showFrames} />
+            <Timeline epochs={epochs} marks={marks} onSelect={selectEpoch} />
+          </div>
+          {fullscreenError && <p className="alert" role="alert">{fullscreenError}</p>}
+          <div className={`loading-line ${prog.done === prog.total && !prog.failed && listing === "done" ? "settled" : ""}`}>
+            <p className="prog" data-testid="progress" role="status">{!n && framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}${listing === "full" ? " · checking wavelengths" : ""}` : ""}</p>
+            {prog.failed > 0 && <button type="button" className="btn small" data-testid="images-retry" onClick={() => setImageAttempt((value) => value + 1)}>Retry images</button>}
+          </div>
+        </div>
+      </main>
+      <Inspector panel={panel} onChange={setPanel} docked={desktopControls && !s.embed}>
+        <div hidden={!(desktopControls && !s.embed) && panel !== "view"} data-testid="view-panel">
+          <form onSubmit={(e) => { e.preventDefault(); go(input); }} className="coordform">
+            <h2 className="h"><label htmlFor="coords">Position</label></h2>
+            <div className="searchrow">
+              <input id="coords" data-testid="coord-input" aria-describedby="coordinate-feedback" aria-invalid={inputMsg?.kind === "err" || undefined} value={input} onChange={(e) => setInput(e.target.value)} inputMode="text" autoComplete="off" spellCheck={false}
+                placeholder="RA and Dec, or a target name" />
+              <button className="go" type="submit" data-testid="coord-go" disabled={resolving}>Go</button>
             </div>
-          )}
-          {s.mode === "rainbow" && (
-            <p className="keyline" data-testid="rainbow-help"><span className="ramp" /> Oldest to newest. White means it did not move or change.</p>
-          )}
-
-          <Filmstrip epochs={epochs} thumbs={thumbs} marks={marks} onSelect={selectEpoch} />
-          <Timeline epochs={epochs} marks={marks} onSelect={selectEpoch} />
-          <p className="prog" data-testid="progress" role="status">
-            {!n && framesState === "loading" ? "Looking up exposures…" : n ? `${prog.done} of ${prog.total} images loaded${prog.done < prog.total ? ` · now fetching ${prog.current}` : ""}${prog.failed ? ` · ${prog.failed} failed (${prog.lastErr})` : ""}${listing === "full" ? ". Still checking wavelengths and quality flags for every exposure." : ""}` : ""}
-          </p>
-          {prog.failed > 0 && <button type="button" className="btn small" data-testid="images-retry" onClick={() => setImageAttempt((n) => n + 1)}>Retry {prog.failed} failed images</button>}
-          <section id="motion-tools" tabIndex={-1} className="motion-tools" aria-label="Find something that moves">
-            <MotionLab norms={norms} epochs={epochs} fovArcmin={s.fov} catalogPm={target?.pm_mas_yr} picked={picked ? { x: picked.x, y: picked.y } : null} pickedMs={cur?.ms}
-              onMarks={(marks, path) => setLab({ marks, path: path ?? [] })} />
-          </section>
-
-        </main>
-
-        {/* ---------------- right: instrument settings ---------------- */}
-        <aside className="rail right">
-          <section>
-            <h2 className="h">View</h2>
+            <div className={`msg ${inputMsg?.kind ?? ""} ${inputMsg?.kind !== "err" && !resolving ? "sr-only" : ""}`} id="coordinate-feedback" data-testid="coord-msg" role="status">{inputMsg?.text ?? `${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</div>
+            <p className="hint sr-only">Name, decimal degrees, or RA/Dec.</p>
+          </form>
+          <section className="view-controls">
+            <h3 className="h">Image</h3>
             <label className="field">Field of view <span className="val">{s.fov}′</span>
               <input type="range" min="1" max="30" step="0.5" value={s.fov} onChange={(e) => set({ fov: +e.target.value })} aria-label="Field of view" data-testid="fov" /></label>
             <label className="field">Wavelength
               <select value={det} onChange={(e) => set({ det: +e.target.value, frame: 0, a: null, b: null })} data-testid="detector">
-                {(detInfo.length ? detInfo : [1, 2, 3, 4, 5, 6].map((d) => ({ detector: d, wl: 0, passes: [] as number[], nFrames: 0 }))).map((d) => <option key={d.detector} value={d.detector}>{d.wl ? `${d.wl.toFixed(1)} µm, ` : ""}detector {d.detector}{d.passes.length ? `, ${d.passes.length} passes` : ""}</option>)}
+                {(detInfo.length ? detInfo : [1, 2, 3, 4, 5, 6].map((d) => ({ detector: d, wl: 0, passes: [] as number[], nFrames: 0 }))).map((d) => <option key={d.detector} value={d.detector} title={`Detector ${d.detector}; ${d.passes.length} passes`}>{d.wl ? `${d.wl.toFixed(1)} µm` : `Detector ${d.detector}`}</option>)}
               </select></label>
             <label className="field">Images
               <select value={s.src} onChange={(e) => set({ src: e.target.value as "stack" | "frame", frame: 0, a: null, b: null })} data-testid="src">
-                <option value="stack">One per pass (combined)</option><option value="frame">Every single exposure</option></select></label>
-            <label className="check"><input type="checkbox" checked={s.wise} onChange={(e) => set({ wise: e.target.checked, frame: 0, a: null, b: null })} data-testid="wise-toggle" /> Add WISE images, 2010 to 2024{wise.length === 0 && framesState === "done" ? " (none)" : ""}</label>
-            <label className="check"><input type="checkbox" checked={s.cross} onChange={(e) => set({ cross: e.target.checked })} /> Crosshair</label>
-            <label className="check"><input type="checkbox" checked={ov.gaia} onChange={(e) => setOv((o) => ({ ...o, gaia: e.target.checked }))} data-testid="ov-gaia" /> Mark Gaia catalogue stars</label>
-            <label className="check"><input type="checkbox" checked={ov.motion} onChange={(e) => setOv((o) => ({ ...o, motion: e.target.checked }))} data-testid="ov-motion" /> Arrows on stars Gaia says are moving</label>
-            <label className="check"><input type="checkbox" checked={ov.known} onChange={(e) => { const checked = e.target.checked; setOv((o) => ({ ...o, known: checked })); if (checked) set({ src: "frame", wise: false, frame: 0 }); }} data-testid="ov-known" /> Label known asteroids</label>
+                <option value="stack">Stacks</option><option value="frame">Exposures</option></select></label>
+            <label className="check"><input type="checkbox" role="switch" checked={s.wise} onChange={(e) => set({ wise: e.target.checked, frame: 0, a: null, b: null })} data-testid="wise-toggle" /> WISE archive · 2010–2024{wise.length === 0 && framesState === "done" ? " (none)" : ""}</label>
+            {expected && <label className="check"><input type="checkbox" role="switch" checked={s.mark} onChange={(event) => set({ mark: event.target.checked })} data-testid="mark-toggle" />Expected position</label>}
+            <label className="check"><input type="checkbox" role="switch" checked={s.cross} onChange={(e) => set({ cross: e.target.checked })} /> Crosshair</label>
+            <label className="check"><input type="checkbox" role="switch" checked={ov.gaia} onChange={(e) => setOv((o) => ({ ...o, gaia: e.target.checked }))} data-testid="ov-gaia" /> Gaia stars</label>
+            <label className="check"><input type="checkbox" role="switch" checked={ov.motion} onChange={(e) => setOv((o) => ({ ...o, motion: e.target.checked }))} data-testid="ov-motion" /> Motion vectors</label>
+            <label className="check"><input type="checkbox" role="switch" checked={ov.known} onChange={(e) => { const checked = e.target.checked; setOv((o) => ({ ...o, known: checked })); if (checked) set({ src: "frame", wise: false, frame: 0 }); }} data-testid="ov-known" /> Known asteroids</label>
             {wantsGaia && <div role="status" className="dim small" data-testid="gaia-status">{gaiaStatus.text}{gaiaStatus.error && <button type="button" className="btn small" onClick={() => retryGaia((n) => n + 1)}>Retry Gaia</button>}</div>}
             {ov.known && <div role="status" className="dim small" data-testid="known-status">
               {knownStatus.text}
               {knownStatus.error && <button type="button" className="btn small" onClick={() => retryKnown((n) => n + 1)}>Retry asteroids</button>}
-              <p>Labels apply to individual SPHEREx exposures, within 6 hours of up to 12 checked dates. Pass stacks and WISE images combine multiple nights. Positions are approximate, as seen from Earth’s centre.</p>
+              <p>Individual exposures only. Up to 12 dates, ±6 hours; geocentric estimates.</p>
               {s.src !== "frame" && <button type="button" className="btn small" onClick={() => set({ src: "frame", wise: false, frame: 0 })}>Use individual SPHEREx exposures</button>}
               {!!known.length && <details><summary>Known objects as text</summary><ul>{known.map((o, i) => <li key={`${o.name}-${o.time}-${i}`}>{o.name}, {o.time}, RA {o.ra.toFixed(5)}°, Dec {o.dec.toFixed(5)}°</li>)}</ul></details>}
             </div>}
-            {(wantsGaia || ov.known) && <p className="dim small">Catalogue markers show returned matches. An object without a marker may still be catalogued.</p>}
-            <label className="check"><input type="checkbox" checked={s.sharp} onChange={(e) => set({ sharp: e.target.checked })} data-testid="sharp-toggle" /> Sharp pixels</label>
-            <label className="check"><input type="checkbox" checked={s.inv} onChange={(e) => set({ inv: e.target.checked })} data-testid="invert-toggle" /> Invert, white sky and dark stars</label>
+            {(wantsGaia || ov.known) && <p className="dim small">Missing markers do not rule out a catalogue match.</p>}
+            <label className="check"><input type="checkbox" role="switch" checked={s.sharp} onChange={(e) => set({ sharp: e.target.checked })} data-testid="sharp-toggle" /> Sharp pixels</label>
+            <label className="check"><input type="checkbox" role="switch" checked={s.inv} onChange={(e) => set({ inv: e.target.checked })} data-testid="invert-toggle" /> Invert sky</label>
             {wiseNote && <p className="dim small">{wiseNote}</p>}
             {s.mode !== "diff" && (
               <details className="more" open={s.bp !== DEFAULTS.bp || s.wp !== DEFAULTS.wp || s.stretch !== "asinh"}>
@@ -758,8 +732,8 @@ export default function App() {
           </section>
 
           <section>
-            <h2 className="h">Data available here</h2>
-            <p className="dim small">Columns are SPHEREx passes over this spot, rows are wavelengths. Numbers count exposures. Click a cell to view it, or drag across passes to limit the dates.</p>
+            <h3 className="h">Exposure map</h3>
+            <p className="dim small">Choose a band and pass. Drag to select a range.</p>
             <Pad
               frames={spx} detector={det} passFrom={passFrom} passTo={passTo} currentPass={cur?.survey === "spherex" ? cur.pass : null}
               onSelect={(sel) => {
@@ -773,17 +747,32 @@ export default function App() {
             {(s.pf != null || s.pt != null) && <button className="btn small" onClick={() => set({ pf: null, pt: null, frame: 0 })}>Use all passes</button>}
           </section>
 
-          <section data-testid="lightcurve-panel">
-            <h2 className="h">Brightness over time</h2>
-            {expected
-              ? <p className="dim">This object moves, so its brightness at one fixed spot is not a fair measure. The spectrum below is taken where it is now.</p>
-              : centre.state === "done" && centrePicked
-              ? <LightCurve curves={curves} kind={centrePicked.kind} />
-              : centre.state === "error"
-                ? <p className="dim">The brightness at the centre could not be measured.</p>
-                : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx data here." : <><i className="spin" /> Measuring whatever sits at the centre in every exposure…</>}</p>}
-          </section>
 
+          <section><h3 className="h">Playback</h3>
+          {animated && n > 1 && (
+            <div className="combine" data-testid="combine">
+              <label className="field">Blend dates · <span className="val">{s.win ? `${Math.min(s.win, winMax)} ${Math.min(s.win, winMax) === 1 ? "year" : "years"}` : "off"}</span>
+                <input type="range" min="0" max={winMax} step="0.5" value={Math.min(s.win, winMax)} onChange={(e) => set({ win: +e.target.value })} aria-label="Blend dates · this many years" data-testid="win" /></label>
+              <label className="check"><input type="checkbox" role="switch" checked={s.ends} onChange={(e) => set({ ends: e.target.checked })} data-testid="ends" /> First + last only</label>
+            </div>
+          )}
+
+            {cur && !many && listing === "done" && cur.flags.length > 0 && <details className="quality-flags"><summary className="badge warn" data-testid="flags">{cur.flags.length} quality flags</summary><ul>{cur.flags.map((flag) => <li key={flag}><b>{flag.replace(/_/g, " ")}</b>: {flagHelp(flag)}</li>)}</ul></details>}
+          </section>
+        </div>
+        <div hidden={!(desktopControls && !s.embed) && panel !== "analyze"}>
+          <div className="analysis-tabs" role="tablist" aria-label="Analysis tool">{analysisTabs.map((tab, index) => <button type="button" key={tab.id} role="tab" id={`analysis-tab-${tab.id}`} aria-selected={analysisTab === tab.id} aria-controls={`analysis-${tab.id}`} tabIndex={analysisTab === tab.id ? 0 : -1} onClick={() => setAnalysisTab(tab.id)} onKeyDown={(event) => {
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+            event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? analysisTabs.length - 1 : (index + (event.key === "ArrowRight" ? 1 : analysisTabs.length - 1)) % analysisTabs.length;
+            setAnalysisTab(analysisTabs[next].id); document.getElementById(`analysis-tab-${analysisTabs[next].id}`)?.focus();
+          }}>{tab.label}</button>)}</div>
+          <div role="tabpanel" id="analysis-motion" aria-labelledby="analysis-tab-motion" hidden={analysisTab !== "motion"}>
+          <section id="motion-tools" tabIndex={-1} className="motion-tools" aria-label="Find something that moves">
+            <MotionLab norms={norms} epochs={epochs} fovArcmin={s.fov} catalogPm={target?.pm_mas_yr} picked={picked ? { x: picked.x, y: picked.y } : null} pickedMs={cur?.ms}
+              onMarks={(marks, path) => setLab({ marks, path: path ?? [] })} />
+          </section>
+          </div>
+          <div role="tabpanel" id="analysis-spectrum" aria-labelledby="analysis-tab-spectrum" hidden={analysisTab !== "spectrum"}>
           <section id="spectrum-tools" tabIndex={-1} data-testid="spectrum-panel">
             <h2 className="h">Spectrum</h2>
             {spec.state === "loading" && <div role="status" data-testid="spectrum-loading">
@@ -799,23 +788,38 @@ export default function App() {
               ? <div className="alert" role="status"><p>The spectrum could not be measured. Try again, or click another star.</p><button type="button" className="btn small" onClick={() => pick({ x: (SIZE - 1) / 2, y: (SIZE - 1) / 2, ra: s.ra, dec: s.dec })}>Retry at the centre</button></div>
               : centrePicked && centrePicked.pts.length
               ? <Spectrum picked={centrePicked} title={expected ? `${target?.name ?? "The object"}, measured where it is now` : "At the centre of the picture"} />
-              : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx spectrum is available for this field." : centre.state === "done" ? "Nothing bright enough to measure at that spot." : <><i className="spin" /> Measuring brightness at every wavelength. This can take up to a minute the first time.</>}</p>)}
-            {spec.state !== "loading" && <p className="dim small">Click any star in the picture to see its spectrum instead.</p>}
+              : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx spectrum is available for this field." : centre.state === "done" ? "Nothing bright enough to measure at that spot." : <><i className="spin" /> Measuring the centre…</>}</p>)}
+            {spec.state !== "loading" && <p className="dim small">Click the image to sample another point.</p>}
           </section>
 
-          <PlanetXPanel value={px} onChange={setPx} epochsCount={epochs.length} spanYears={spanYr} fovArcmin={s.fov} inViewCount={planet?.inView ?? 0} />
-          <section>
-            {ready && <ContextPanel view={view} />}
-          </section>
-        </aside>
-      </div>
 
-      {!s.embed && (
-        <footer className="foot">
-          <span>Data from NASA/IPAC IRSA (SPHEREx) and unWISE via WiseView (WISE, NEOWISE). North is up, east is left.</span>
-          <span>Copy the address bar to share this view. Space plays or pauses, arrow keys step. Drag the picture to move, scroll to zoom.</span>
-        </footer>
-      )}
+          </div>
+          <div role="tabpanel" id="analysis-brightness" aria-labelledby="analysis-tab-brightness" hidden={analysisTab !== "brightness"}>
+          <section data-testid="lightcurve-panel">
+            <h2 className="h">Brightness</h2>
+            {expected
+              ? <p className="dim">Moving target: fixed-position brightness is unreliable. Use Spectrum.</p>
+              : centre.state === "done" && centrePicked
+              ? <LightCurve curves={curves} kind={centrePicked.kind} />
+              : centre.state === "error"
+                ? <p className="dim">The brightness at the centre could not be measured.</p>
+                : <p className="dim" role="status">{framesState === "done" && !spx.length ? "No SPHEREx data here." : <><i className="spin" /> Measuring brightness…</>}</p>}
+          </section>
+
+
+          </div>
+          <div role="tabpanel" id="analysis-planet" aria-labelledby="analysis-tab-planet" hidden={analysisTab !== "planet"}><PlanetXPanel value={px} onChange={setPx} epochsCount={epochs.length} spanYears={spanYr} fovArcmin={s.fov} inViewCount={planet?.inView ?? 0} /></div>
+          <div role="tabpanel" id="analysis-context" aria-labelledby="analysis-tab-context" hidden={analysisTab !== "context"}>{ready && <ContextPanel view={view} />}</div>
+        </div>
+        <div hidden={panel !== "about"} className="field-notes">
+          <section data-testid="about-target"><h3>{target?.name ?? "Custom position"}</h3><p className="dim">{target?.note ?? `${fmtRA(s.ra)} ${fmtDec(s.dec)}`}</p>
+            {expected && <><p className="measured" data-testid="measured">{measured ? `Measured ${measured.rate.toFixed(1)}″/year ${measured.dir} · ${measured.n} dates. Catalogue ${expected.rate.toFixed(1)}″/year.` : `Catalogue ${expected.rate.toFixed(1)}″/year ${expected.dir}.`}</p></>}
+          </section>
+          <Walkthrough onApply={(value) => { applyWalk(value); setPanel(null); }} />
+          <p className="dim small">North ↑ · East ←. Space plays/pauses. Arrow keys step through dates. Focus the image to select a point with the keyboard; Enter measures it. Shift + arrows pan.</p>
+          <p className="dim small">SPHEREx: NASA/IPAC IRSA. WISE/NEOWISE: unWISE via WiseView.</p>
+        </div>
+      </Inspector>
     </div>
   );
 }
@@ -830,9 +834,4 @@ function compassDir(pmRa: number, pmDec: number): string {
   const ang = (Math.atan2(pmRa, pmDec) * 180) / Math.PI; // 0 = north, 90 = east
   const names = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
   return names[((Math.round(ang / 45) % 8) + 8) % 8];
-}
-
-/** An angle in arcseconds, written the way a person would say it. */
-function fmtArc(a: number): string {
-  return a >= 120 ? `${(a / 60).toFixed(a >= 600 ? 0 : 1)} arcminutes` : `${a >= 10 ? a.toFixed(0) : a.toFixed(1)} arcseconds`;
 }

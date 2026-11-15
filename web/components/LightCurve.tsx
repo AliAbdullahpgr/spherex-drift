@@ -46,7 +46,7 @@ export default function LightCurve({ curves, kind }: { curves: Curve[]; kind: "f
       <div className="legend">
         {usable.map((c) => <span key={c.det}><i className="dot" style={{ background: BAND[(c.det - 1) % 6] }} />{c.wl.toFixed(1)} µm</span>)}
       </div>
-      <p className="dim small">Each line is one wavelength band, with its first pass set to 100%.{kind === "halo" ? " This star saturates the detector, so brightness is measured from its outer halo." : ""}</p>
+      <p className="dim small">First pass = 100%.{kind === "halo" ? " Saturated core; outer-halo measurement." : ""}</p>
       <details className="measurement-data" data-testid="lightcurve-data">
         <summary>View brightness measurements as a table</summary>
         <div className="data-table" tabIndex={0} role="region" aria-label="Brightness over time measurements, scroll horizontally if needed">

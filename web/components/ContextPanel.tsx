@@ -51,7 +51,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
 
   return (
     <section data-testid="context-panel">
-      <h2 className="h">The same spot in another survey</h2>
+      <h2 className="h">Reference image</h2>
       <figure className={styles.fig}>
         <div className={styles.pic} data-testid="context-picture" data-state={state.status}>
           {info && (
@@ -70,7 +70,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
         </div>
         <figcaption className={`${styles.cap} dim small`}>
           {info ? (
-            <><b>{info.label}</b>, {light}. {info.about} Same field and orientation as the {sourceLabel} image: north is up, east is left.</>
+            <><b>{info.label}</b>, {light}. North ↑ · East ←.</>
           ) : state.status === "none" ? (
             <>Use the links below to see this spot in other sky surveys.</>
           ) : (
@@ -78,7 +78,7 @@ export default function ContextPanel({ view, sourceLabel = "SPHEREx" }: ContextP
           )}
         </figcaption>
       </figure>
-      <h2 className={`h ${styles.sub}`}>Look this spot up elsewhere</h2>
+      <h2 className={`h ${styles.sub}`}>Open in</h2>
       <ul className={styles.links}>
         {links.filter((l) => l.id !== "finderchart").map((l) => (
           <li key={l.id}>

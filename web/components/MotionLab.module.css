@@ -16,3 +16,5 @@
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .list li button { margin-top: 0; flex: none; }
 .list li.on { color: var(--mark); }
+:global(.control-rail) .num { font-size: 14px; min-height: 40px; border-radius: 8px; }
+:global(.control-rail) .sub { font-size: 14px; }

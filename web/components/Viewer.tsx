@@ -205,7 +205,7 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
         <canvas
           ref={cv} width={size} height={size} data-testid="viewer-canvas" role="group" tabIndex={0} aria-label="Interactive sky image" aria-describedby={helpId} className={sharp ? "sharp" : undefined}
           style={{ touchAction: touchPan ? "none" : "pan-y pinch-zoom" }}
-          onKeyDown={keyboard} onFocus={() => setCursor({ x: Math.floor(w / 2), y: Math.floor(w / 2) })} onBlur={() => setCursor(null)}
+          onKeyDown={keyboard} onFocus={(event) => { if (event.currentTarget.matches(":focus-visible")) setCursor({ x: Math.floor(w / 2), y: Math.floor(w / 2) }); }} onBlur={() => setCursor(null)}
           onPointerDown={down} onPointerMove={move} onPointerUp={(e) => up(e)} onPointerCancel={(e) => up(e, true)}
           onPointerLeave={() => onHover(null)}
           onClick={click}
@@ -243,7 +243,7 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
         {busy && <div className="busy" role="status" data-testid="busy"><i className="spin" />{busy}</div>}
       </div>
       <button type="button" className="btn touch-nav" aria-pressed={touchPan} data-testid="touch-pan" onClick={() => setTouchPan((v) => !v)}>
-        {touchPan ? "Done moving sky · scroll page" : "Move sky by touch"}
+        {touchPan ? "Done" : "Move sky"}
       </button>
       <p id={helpId} className="sr-only">{caption}. Arrow keys move the selection; Enter measures its spectrum. Home selects the centre. Shift and arrow keys pan the sky. Plus and minus zoom. Space plays or pauses.</p>
       <p className="sr-only" role="status">{cursor ? `Selected ${fmtRA(pix2sky(cursor.x, cursor.y, w, scale, ra, dec).ra)} ${fmtDec(pix2sky(cursor.x, cursor.y, w, scale, ra, dec).dec)}` : ""}</p>
@@ -254,7 +254,7 @@ export default function Viewer({ image, size, fov, ra, dec, crosshair, busy, pic
 export function Readout({ hover, value }: { hover: { ra: number; dec: number; x: number; y: number } | null; value?: string }) {
   return (
     <div className={`readout ${hover ? "mono" : ""}`} data-testid="readout" aria-live="off">
-      {hover ? <>RA {fmtRA(hover.ra)} · Dec {fmtDec(hover.dec)} · {hover.ra.toFixed(5)}, {hover.dec.toFixed(5)}{value ? ` · ${value}` : ""}</> : "Drag to move, scroll to zoom, double-click to centre. Click a star for its spectrum."}
+      {hover ? <>RA {fmtRA(hover.ra)} · Dec {fmtDec(hover.dec)} · {hover.ra.toFixed(5)}, {hover.dec.toFixed(5)}{value ? ` · ${value}` : ""}</> : "Drag to pan · Scroll to zoom · Click to inspect"}
     </div>
   );
 }
