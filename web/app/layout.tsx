@@ -9,6 +9,7 @@ const serif = Instrument_Serif({ subsets: ["latin"], weight: "400", style: ["nor
 export const metadata: Metadata = {
   title: "SPHEREx Drift: spot what moves in the sky",
   description: "Blink, rainbow-trail and difference views of SPHEREx and WISE images for any patch of sky.",
+  icons: { icon: "/icon.svg" },
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#000000" };
 
