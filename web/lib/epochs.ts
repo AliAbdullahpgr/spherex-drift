@@ -67,6 +67,46 @@ export function buildEpochs(spx: Frame[], wise: Frame[], o: EpochOpts): Epoch[] 
   return out.sort((a, b) => a.ms - b.ms);
 }
 
+/** Dates that can be compared pixel for pixel: same survey, same band. */
+export const groupOf = (e: Epoch) => (e.survey === "wise" ? `wise:${WISE_BAND(e.wl)}` : `spherex:${e.detector}`);
+const YEAR = 365.25 * 86400000;
+
+/** One frame of the animation: one date, or several dates of the same survey and band averaged together. */
+export type AnimFrame = { idx: number; members: number[]; ms: number; from: number; to: number };
+
+/**
+ * Frames to animate. windowYr = 0 gives one frame per date. Otherwise each frame is every date of the
+ * same survey and band within windowYr of that date, so the full time span gives a single frame;
+ * dates that would give the identical frame are shown once.
+ */
+export function animFrames(epochs: Epoch[], windowYr: number, endsOnly: boolean): AnimFrame[] {
+  const out: AnimFrame[] = [];
+  const seen = new Set<string>();
+  epochs.forEach((e, i) => {
+    const g = groupOf(e);
+    const members = windowYr > 0 ? epochs.map((x, j) => (groupOf(x) === g && Math.abs(x.ms - e.ms) <= windowYr * YEAR + 1 ? j : -1)).filter((j) => j >= 0) : [i];
+    const key = members.join(",");
+    if (seen.has(key)) return;
+    seen.add(key);
+    const t = members.map((j) => epochs[j].ms);
+    out.push({ idx: i, members, ms: mean(t), from: Math.min(...t), to: Math.max(...t) });
+  });
+  return endsOnly && out.length > 2 ? [out[0], out[out.length - 1]] : out;
+}
+
+/**
+ * The dates subtracted from a frame in "each date minus the rest": every other date of the same survey
+ * and band. Dates within a year of the frame are left out (a slow mover would partly subtract itself)
+ * as long as at least three others remain.
+ */
+export function restOf(epochs: Epoch[], f: AnimFrame): number[] {
+  const g = groupOf(epochs[f.idx]);
+  const mine = new Set(f.members);
+  const others = epochs.map((x, j) => (groupOf(x) === g && !mine.has(j) ? j : -1)).filter((j) => j >= 0);
+  const far = others.filter((j) => epochs[j].ms < f.from - YEAR || epochs[j].ms > f.to + YEAR);
+  return far.length >= 3 ? far : others;
+}
+
 export const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 export const FLAG_HELP: Record<string, string> = {

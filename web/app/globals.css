@@ -99,7 +99,22 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; f
 /* the picture */
 .viewer { width: var(--pic); margin: 12px auto 0; }
 .frame { position: relative; width: 100%; aspect-ratio: 1; background: #000; overflow: hidden; outline: 1px solid var(--line); }
-.frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: manipulation; }
+.frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; user-select: none; -webkit-user-select: none; }
+.frame canvas.sharp { image-rendering: pixelated; }
+.frame.moving canvas { cursor: grabbing; }
+.frame.moving .pmark, .frame.moving .onsky { visibility: hidden; }
+.cross { stroke: rgba(255,255,255,.55); }
+/* the border flashes when the animation starts over, so a mover reads as travelling one way */
+.loopflash { position: absolute; inset: 0; border: 2px dashed var(--mark); pointer-events: none; opacity: 0; animation: loopflash .7s ease-out; }
+@keyframes loopflash { from { opacity: 1; } to { opacity: 0; } }
+/* white sky: the furniture drawn over the picture turns dark */
+.frame.inv .cross { stroke: rgba(0,0,0,.6); }
+.frame.inv .compass { filter: drop-shadow(0 0 2px #fff); }
+.frame.inv .compass g { stroke: #000; } .frame.inv .compass text { fill: #000; }
+.frame.inv .hud { color: #000; text-shadow: 0 0 4px #fff, 0 0 10px #fff, 0 1px 2px #fff; }
+.frame.inv .hud.info span { color: #222; }
+.frame.inv .scalebar { border-color: #000; filter: drop-shadow(0 0 2px #fff); }
+.frame.inv .scalebar span { color: #000; text-shadow: 0 0 3px #fff, 0 0 3px #fff; }
 .overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .corner { display: none; }
 .compass { position: absolute; top: 14px; left: 14px; width: 42px; height: 42px; pointer-events: none; opacity: .85; filter: drop-shadow(0 0 2px #000); }
@@ -142,6 +157,9 @@ input[type=checkbox] { accent-color: var(--accent); width: 15px; height: 15px; f
 input[type=range] { accent-color: var(--accent); width: 100%; min-width: 0; padding: 0; margin: 0; }
 .badge { font-size: 12.5px; padding: 2px 8px; border: 1px solid; cursor: help; white-space: nowrap; }
 .badge.warn { color: var(--mark); border-color: #5c4a1a; } .badge.ok { color: var(--good); border-color: #23513d; }
+.combine { width: var(--pic); margin: 4px auto 0; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+.combine .field { flex: 1 1 240px; margin-bottom: 0; } .combine .check { margin-top: 0; }
+.diffctl .seg { margin-bottom: 0; }
 .diffctl { display: grid; gap: 12px; width: var(--pic); margin: 4px auto 0; }
 .diffpick { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .diffpick label, .field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--dim); }

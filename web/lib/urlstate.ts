@@ -5,11 +5,14 @@ export type AppState = {
   ra: number; dec: number; fov: number; mode: Mode; frame: number; det: number | null; stretch: Stretch;
   bp: number; wp: number; wise: boolean; speed: number; src: "stack" | "frame";
   a: number | null; b: number | null; pf: number | null; pt: number | null; cross: boolean; mark: boolean; mock: boolean; embed: boolean; play: boolean;
+  /** Sharp (nearest-neighbour) pixels; white-sky display; which kind of difference; years of dates averaged per frame; first and last dates only. */
+  sharp: boolean; inv: boolean; diff: "each" | "pair"; win: number; ends: boolean;
 };
 
 export const DEFAULTS: AppState = {
   ra: 133.795129, dec: -7.245147, fov: 5, mode: "blink", frame: 0, det: null, stretch: "asinh", bp: 50, wp: 99.8,
-  wise: false, speed: 2, src: "stack", a: null, b: null, pf: null, pt: null, cross: true, mark: true, mock: false, embed: false, play: false,
+  wise: false, speed: 2, src: "stack", a: null, b: null, pf: null, pt: null, cross: true, mark: true, mock: false, embed: false, play: true,
+  sharp: true, inv: false, diff: "each", win: 0, ends: false,
 };
 
 const num = (v: string | null, d: number) => { const x = v == null || v === "" ? NaN : Number(v); return Number.isFinite(x) ? x : d; };
@@ -31,7 +34,11 @@ export function readState(search: string): AppState {
     wise: p.get("wise") === "1", speed: Math.min(10, Math.max(0.25, num(p.get("speed"), DEFAULTS.speed))),
     src: p.get("src") === "frame" ? "frame" : "stack",
     a: optNum(p.get("a")), b: optNum(p.get("b")), pf: optNum(p.get("pf")), pt: optNum(p.get("pt")),
-    cross: p.get("cross") !== "0", mark: p.get("mark") !== "0", mock: p.get("mock") === "1", embed: p.get("embed") === "1", play: p.get("play") === "1",
+    cross: p.get("cross") !== "0", mark: p.get("mark") !== "0", mock: p.get("mock") === "1", embed: p.get("embed") === "1", play: p.get("play") !== "0",
+    sharp: p.get("sharp") !== "0", inv: p.get("inv") === "1",
+    // links made before "each date minus the rest" existed carry a and b: keep them on the two-date view
+    diff: p.get("diff") === "pair" || (p.get("diff") == null && (p.has("a") || p.has("b"))) ? "pair" : "each",
+    win: Math.min(30, Math.max(0, num(p.get("win"), 0))), ends: p.get("ends") === "1",
   };
 }
 
@@ -55,6 +62,11 @@ export function writeState(s: AppState): string {
   if (!s.mark) p.set("mark", "0");
   if (s.mock) p.set("mock", "1");
   if (s.embed) p.set("embed", "1");
-  if (s.play) p.set("play", "1");
+  if (!s.play) p.set("play", "0");
+  if (!s.sharp) p.set("sharp", "0");
+  if (s.inv) p.set("inv", "1");
+  if (s.mode === "diff" && s.diff === "pair") p.set("diff", "pair");
+  if (s.win) p.set("win", String(s.win));
+  if (s.ends) p.set("ends", "1");
   return p.toString();
 }

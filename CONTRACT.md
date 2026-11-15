@@ -95,3 +95,19 @@ Added by the SPHEREx backend (api/). Existing shapes are unchanged; everything b
 - `GET /resolve?name=` looks up an object name with the CDS Sesame service and returns `{"name","ra","dec"}`; 404 when unknown.
 - `GET /spectrum` also accepts `cra`,`cdec` (centre of the field on screen) so cached pixels are reused, and each point carries `halo_mjy_sr`: the brightness of the star's outer halo (ring 4-7 pixels out minus ring 10-13 pixels out). It is the usable brightness measure when the core is saturated; `flux_mjy_sr` is null for such points.
 - `/targets` entries may carry `kind` ("mover" or "variable"), and for movers `pm_mas_yr` and `epoch`.
+
+### Catalogue overlays and context (api/app/overlays.py, web/lib/overlays.ts)
+Cached on disk under `api/cache/overlays/`. When an outside service is down these return 200 with an empty
+list and a `note` (never a 500); failures are not cached.
+- `GET /gaia?ra&dec&fov` → `{"sources":[{"source_id":"447…","ra","dec","pmra","pmdec","gmag","ref_epoch":2016.0}],"n","service","note"?}`.
+  Gaia DR3; positions are for `ref_epoch`; `pmra` (= pm_ra·cos dec) and `pmdec` in mas/yr, may be null.
+  The 300 brightest stars within the field (plus 1 arcmin) and every star faster than 150 mas/yr within
+  the field plus 3 arcmin. `source_id` is a string. Tries ESA Gaia TAP, then the VizieR mirror at CfA, IRSA, CDS.
+- `GET /known?ra&dec&fov&time=<ISO>` (repeat `time`, or `times=a,b,c`; at most 48) →
+  `{"times":[…],"objects":[{"time","name","number","ra","dec","vmag","class","motion_arcsec_hr","dra_arcsec_hr","ddec_arcsec_hr","err_arcsec","dist_au"}],"note"?}`.
+  IMCCE SkyBoT cone search (field plus 2 arcmin), observer at Earth's centre; times are rounded to the minute and
+  each object row carries the rounded `time` it belongs to. `dra_arcsec_hr` is the eastward motion on the sky.
+- `GET /context?ra&dec&fov&size=512` → JPEG, north up, east left, same field. Headers `X-Context-Source`
+  (`ls-dr10`, `ps1`, `dss2` or `unwise`), `X-Context-Label`, `X-Context-Kind` (`visible`|`infrared`). 404 when nothing covers it.
+  `GET /context/info?…` → `{"available","source","label","kind","about","note","image_url"}` (for the caption).
+- `GET /links?ra&dec` → `{"links":[{"id","label","url","about"}]}`, ids `simbad`, `vizier`, `legacy`, `wiseview`, `finderchart`.

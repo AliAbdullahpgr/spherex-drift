@@ -59,7 +59,33 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
   await page.screenshot({ path: `${OUT}/${name}-blink.png`, fullPage: true });
   await noOverflow(page, `${name} blink`);
 
-  // blink: step changes the caption; play toggles
+  // blink plays by itself: the caption changes without Play being pressed
+  const capA = await page.textContent('[data-testid=caption]');
+  await page.waitForFunction((c) => document.querySelector('[data-testid=caption]')?.textContent !== c, capA, { timeout: 4000 }).catch(() => {});
+  ok((await page.textContent('[data-testid=caption]')) !== capA, `${name}: blink autoplays (frames advance without pressing Play)`);
+  ok((await page.getAttribute('[data-testid=play]', "aria-label")) === "Pause", `${name}: the button offers Pause while autoplaying`);
+  await page.click('[data-testid=play]'); // pause
+  await page.waitForTimeout(700);
+  const capP = await page.textContent('[data-testid=caption]');
+  await page.waitForTimeout(900);
+  ok((await page.textContent('[data-testid=caption]')) === capP, `${name}: pause holds the frame`);
+  ok(/play=0/.test(page.url()), `${name}: paused state is in the URL`);
+
+  // invert: white sky, dark stars
+  const lum = () => page.evaluate(() => { const c = document.querySelector('[data-testid=viewer-canvas]'); const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let t = 0; for (let i = 0; i < d.length; i += 4) t += d[i]; return t / (d.length / 4); });
+  const lum0 = await lum();
+  ok(await page.$eval('[data-testid=viewer-canvas]', (c) => getComputedStyle(c).imageRendering === "pixelated"), `${name}: sharp pixels on by default`);
+  await page.check('[data-testid=invert-toggle]');
+  await page.waitForTimeout(200);
+  const lum1 = await lum();
+  ok(lum0 < 90 && lum1 > 165, `${name}: invert turns the dark sky white (mean ${lum0.toFixed(0)} -> ${lum1.toFixed(0)})`);
+  await page.screenshot({ path: `${OUT}/${name}-blink-invert.png`, fullPage: true });
+  await page.uncheck('[data-testid=invert-toggle]');
+  await page.uncheck('[data-testid=sharp-toggle]');
+  ok(await page.$eval('[data-testid=viewer-canvas]', (c) => getComputedStyle(c).imageRendering !== "pixelated"), `${name}: sharp pixels can be turned off`);
+  await page.check('[data-testid=sharp-toggle]');
+
+  // step changes the caption; play toggles
   const cap0 = await page.textContent('[data-testid=caption]');
   await page.click('[aria-label="Next date"]');
   const cap1 = await page.textContent('[data-testid=caption]');
@@ -88,8 +114,43 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
     ok(Math.max(r, g, b) - Math.min(r, g, b) < 70 && g > 150, `${name}: stationary bright star is ~white (${rb.star})`);
   }
 
-  // diff
+  // diff: each date minus the rest is the default; the mover survives, a fixed star cancels
   await page.click('[data-testid=mode-diff]');
+  await loaded(page); await page.waitForTimeout(400);
+  ok(await page.$eval('[data-testid=diff-each]', (e) => e.getAttribute("aria-pressed") === "true"), `${name}: difference opens on each date minus the rest`);
+  if (MOCK) {
+    const each = await page.evaluate(() => {
+      const c = document.querySelector('[data-testid=viewer-canvas]');
+      const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data, w = c.width;
+      let mover = 0, star = 0;
+      for (let y = 105; y < 150; y++) for (let x = 100; x < 150; x++) { const i = (y * w + x) * 4; if (d[i] > d[i + 2] + 60 && d[i] > 90) mover++; }
+      for (let y = 60; y < 81; y++) for (let x = 50; x < 71; x++) { const i = (y * w + x) * 4; star = Math.max(star, d[i] + d[i + 1] + d[i + 2]); }
+      return { mover, star };
+    });
+    ok(each.mover >= 8, `${name}: each date minus the rest shows the mover in orange (${each.mover} px)`);
+    ok(each.star < 120, `${name}: each date minus the rest cancels the fixed bright star (brightest residual ${each.star} of 765)`);
+    const capE = await page.textContent('[data-testid=caption]');
+    await page.click('[data-testid=play]');
+    await page.waitForTimeout(1300);
+    ok((await page.textContent('[data-testid=caption]')) !== capE, `${name}: each date minus the rest plays as an animation`);
+    await page.click('[data-testid=play]');
+  }
+  await page.screenshot({ path: `${OUT}/${name}-diff-each.png`, fullPage: true });
+  await noOverflow(page, `${name} diff each`);
+  // sliding window and first/last
+  const count = async () => (await page.textContent('[data-testid=frame-count]')).trim();
+  const c0 = await count();
+  await page.check('[data-testid=ends]');
+  ok(/of 2$/.test(await count()), `${name}: first and last dates only leaves two frames (${c0} -> ${await count()})`);
+  await page.uncheck('[data-testid=ends]');
+  await page.$eval('[data-testid=win]', (el) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(el, el.max); el.dispatchEvent(new Event("input", { bubbles: true })); });
+  await page.waitForTimeout(200);
+  ok(/^1 of 1$/.test(await count()) && /win=/.test(await page.evaluate(() => new Promise((r) => setTimeout(() => r(location.search), 250)))), `${name}: combining over the full span leaves one frame (${await count()})`);
+  await page.$eval('[data-testid=win]', (el) => { const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(el, "0"); el.dispatchEvent(new Event("input", { bubbles: true })); });
+  ok((await count()) === c0, `${name}: window off restores every date (${await count()})`);
+
+  // two dates
+  await page.click('[data-testid=diff-pair]');
   await loaded(page); await page.waitForTimeout(300);
   await page.screenshot({ path: `${OUT}/${name}-diff.png`, fullPage: true });
   await noOverflow(page, `${name} diff`);
@@ -157,6 +218,48 @@ for (const [name, vp] of [["desktop", { width: 1440, height: 900 }], ["phone", {
   await page.click('[data-testid=target-wise0855]');
   await page.waitForTimeout(400);
   ok(Math.abs(+new URL(page.url()).searchParams.get("ra") - 133.795129) < 1e-4, `${name}: quick-pick WISE 0855`);
+
+  // pan and zoom like a map
+  await page.click('[data-testid=mode-blink]');
+  await loaded(page); await page.waitForTimeout(300);
+  await cv.scrollIntoViewIfNeeded();
+  const pb = await cv.boundingBox();
+  const before = new URL(page.url());
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pb.x + pb.width / 2 + pb.width / 5, pb.y + pb.height / 2 + pb.height / 8, { steps: 6 });
+  ok(/translate/.test(await cv.evaluate((c) => c.style.transform)), `${name}: the picture follows the pointer during a drag`);
+  await page.mouse.up();
+  await page.waitForTimeout(500);
+  let after = new URL(page.url());
+  const dRa = (+after.searchParams.get("ra") - +before.searchParams.get("ra")) * 3600 * Math.cos((7.245 * Math.PI) / 180), dDec = (+after.searchParams.get("dec") - +before.searchParams.get("dec")) * 3600;
+  // dragged right and down by fov/5 and fov/8: the new centre is east (larger RA) and north
+  ok(Math.abs(dRa - 60) < 6 && Math.abs(dDec - 37.5) < 6, `${name}: drag pans (centre moved ${dRa.toFixed(1)}″ east, ${dDec.toFixed(1)}″ north)`);
+  ok(!(await page.$('[data-testid=pick-ring]')), `${name}: a drag is not taken for a click`);
+  await loaded(page); await page.waitForTimeout(300);
+  ok((await cv.evaluate((c) => c.style.transform)) === "", `${name}: the picture settles after the pan`);
+  await page.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(900);
+  after = new URL(page.url());
+  ok(+after.searchParams.get("fov") > 5 && +after.searchParams.get("fov") <= 30, `${name}: wheel changes the field of view (5 -> ${after.searchParams.get("fov")})`);
+  await loaded(page); await page.waitForTimeout(300);
+  const b4 = +new URL(page.url()).searchParams.get("dec");
+  await cv.dblclick({ position: { x: pb.width / 2, y: pb.height / 4 } });
+  await page.waitForTimeout(600);
+  ok(+new URL(page.url()).searchParams.get("dec") > b4 + 0.01, `${name}: double-click recentres on that point`);
+  await loaded(page);
+  await noOverflow(page, `${name} after pan and zoom`);
+
+  // a bare link lands on blink, playing, with WISE
+  if (MOCK) {
+    await page.goto(`${BASE}/?mock=1`);
+    await page.waitForSelector('[data-testid=viewer-canvas]');
+    await page.waitForTimeout(700);
+    const lu = new URL(page.url());
+    ok(lu.searchParams.get("mode") === "blink" && lu.searchParams.get("wise") === "1" && !lu.searchParams.has("play"), `${name}: bare link opens on blink, playing, with WISE (${lu.search})`);
+    await page.waitForSelector('[data-testid=loop-flash]', { timeout: 30000, state: "attached" }).then(() => ok(true, `${name}: the border flashes when the loop starts over`), () => ok(false, `${name}: the border flashes when the loop starts over`));
+  }
 
   // URL state round trip + embed
   await page.goto(`${BASE}/?${Q.replace("&mode=blink", "")}&mode=rainbow&fov=10&stretch=log&wise=1&embed=1`);

@@ -20,6 +20,12 @@ try:  # WISE router is owned by another module; optional here
 except ImportError:
     pass
 
+try:  # Gaia / known-object / context overlays (app/overlays.py)
+    from .overlays import router as overlays_router
+    app.include_router(overlays_router)
+except ImportError:
+    pass
+
 
 def _clean(obj):
     """Replace NaN/inf floats with None so the response is valid JSON."""

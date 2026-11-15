@@ -124,11 +124,11 @@ export function stretched(n: Norm, lv: Levels, kind: Stretch): Float32Array {
   return out;
 }
 
-export function toGray(n: Norm, lv: Levels, kind: Stretch): ImageData {
+export function toGray(n: Norm, lv: Levels, kind: Stretch, invert = false): ImageData {
   const s = stretched(n, lv, kind);
   const id = new ImageData(n.w, n.h);
   for (let i = 0; i < s.length; i++) {
-    const g = Math.round(s[i] * 255);
+    const g = invert ? 255 - Math.round(s[i] * 255) : Math.round(s[i] * 255);
     id.data[i * 4] = id.data[i * 4 + 1] = id.data[i * 4 + 2] = g;
     id.data[i * 4 + 3] = 255;
   }
@@ -168,40 +168,93 @@ export function rainbow(epochs: { n: Norm; lv: Levels }[], kind: Stretch): Image
   return id;
 }
 
-/** B minus A on normalised (sigma) data. Negative -> blue, positive -> orange, zero -> black. NaN -> black. */
-export function difference(a: Norm, b: Norm, gain: number): ImageData {
-  const n = a.data.length;
-  const d = new Float32Array(n);
-  // undo per-epoch sigma scaling so equal-brightness stars cancel; express result in mean sigma
-  const sa0 = a.sigma ?? 1, sb = b.sigma ?? 1, sm = (sa0 + sb) / 2;
-  const abs: number[] = [];
-  const w0 = a.w, h0 = a.h;
-  const step = Math.max(1, Math.floor(n / 20000));
+/**
+ * Mean of several dates. Each is first put back into common brightness units (data * sigma); the result
+ * is expressed in the noise units of `ref`, so display levels worked out for `ref` apply to it unchanged.
+ */
+export function combine(list: Norm[], ref: Norm): Norm {
+  if (list.length === 1 && list[0] === ref) return ref;
+  const rs = ref.sigma ?? 1, n = ref.data.length;
+  const out = new Float32Array(n);
+  const sig = list.map((m) => m.sigma ?? 1);
   for (let i = 0; i < n; i++) {
-    const v = (b.data[i] * sb - a.data[i] * sa0) / sm;
-    d[i] = v;
-    if (i % step === 0 && Number.isFinite(v)) abs.push(Math.abs(v));
+    let s = 0, c = 0;
+    for (let k = 0; k < list.length; k++) { const v = list[k].data[i]; if (Number.isFinite(v)) { s += v * sig[k]; c++; } }
+    out[i] = c ? s / c / rs : NaN;
   }
-  // remove slowly varying background mismatch (zodiacal gradients) with a wide box blur of the difference
-  const bgv = boxBlur(d, w0, h0, Math.max(8, Math.round(w0 / 10)));
-  abs.length = 0;
+  return { w: ref.w, h: ref.h, data: out, sigma: rs };
+}
+
+/** A difference picture before colouring: values in noise units, and the value that maps to full colour. */
+export type DiffField = { w: number; h: number; data: Float32Array; scale: number; floor: number };
+
+/**
+ * Remove slowly varying background mismatch (zodiacal gradients) in place. Returns the value that maps
+ * to full colour, and a floor below which a pixel is plain noise and stays uncoloured.
+ */
+function settle(d: Float32Array, w: number, h: number): { scale: number; floor: number } {
+  const n = d.length, step = Math.max(1, Math.floor(n / 20000));
+  const bgv = boxBlur(d, w, h, Math.max(8, Math.round(w / 10)));
+  const abs: number[] = [];
   for (let i = 0; i < n; i++) { d[i] -= bgv[i]; if (i % step === 0 && Number.isFinite(d[i])) abs.push(Math.abs(d[i])); }
-  const sa = Float32Array.from(abs).sort();
-  // scale from the 99.7th percentile of |difference|, never below 7 sigma, so noise stays dark
-  const scale = Math.max(7, pct(sa, 99.9)) / Math.max(0.2, gain);
-  const id = new ImageData(a.w, a.h);
-  for (let i = 0; i < n; i++) {
-    const v = d[i];
+  const sorted = Float32Array.from(abs).sort();
+  const noise = Math.max(1e-6, 1.4826 * pct(sorted, 50)); // robust scatter of the difference itself
+  // full colour at the 99.9th percentile of |difference|, never below 8 times the noise; nothing under 2.5 times the noise is coloured
+  return { scale: Math.max(8 * noise, pct(sorted, 99.9)), floor: 2.5 * noise };
+}
+
+/** Negative -> blue, positive -> orange, zero -> black (or white when inverted). NaN -> background. */
+export function paintDiff(f: DiffField, scale = f.scale, invert = false): ImageData {
+  const id = new ImageData(f.w, f.h), k = Math.asinh(6);
+  for (let i = 0; i < f.data.length; i++) {
+    const v = f.data[i];
     let r = 0, g = 0, bl = 0;
     if (Number.isFinite(v)) {
-      const t = Math.min(1, Math.abs(v) / scale);
-      const s = Math.asinh(6 * t) / Math.asinh(6);
+      const s = Math.asinh(6 * Math.min(1, Math.max(0, (Math.abs(v) - f.floor) / Math.max(1e-6, scale - f.floor)))) / k;
       if (v > 0) { r = 255 * s; g = 150 * s; bl = 0; }          // orange  (#FF9600)
       else { r = 0; g = 130 * s; bl = 255 * s; }                 // blue    (#0082FF)
-    }
+      if (invert) { r += 255 * (1 - s); g += 255 * (1 - s); bl += 255 * (1 - s); }
+    } else if (invert) r = g = bl = 255;
     id.data[i * 4] = r; id.data[i * 4 + 1] = g; id.data[i * 4 + 2] = bl; id.data[i * 4 + 3] = 255;
   }
   return id;
+}
+
+/** B minus A on normalised (sigma) data. Negative -> blue, positive -> orange, zero -> black. NaN -> black. */
+export function difference(a: Norm, b: Norm, gain: number, invert = false): ImageData {
+  const n = a.data.length;
+  const d = new Float32Array(n);
+  // undo per-epoch sigma scaling so equal-brightness stars cancel; express result in mean sigma
+  const sa = a.sigma ?? 1, sb = b.sigma ?? 1, sm = (sa + sb) / 2;
+  for (let i = 0; i < n; i++) d[i] = (b.data[i] * sb - a.data[i] * sa) / sm;
+  const lv = settle(d, a.w, a.h), scale = Math.max(lv.floor * 1.5, lv.scale / Math.max(0.2, gain));
+  return paintDiff({ w: a.w, h: a.h, data: d, scale, floor: lv.floor }, scale, invert);
+}
+
+/**
+ * One date minus the per-pixel median of the other dates (WiseView's "each date minus the rest").
+ * Everything that sits still at constant brightness is in the median and cancels; what moved or
+ * changed is left. Works in common brightness units; the result is in units of the target's noise.
+ */
+export function minusRest(target: Norm, rest: Norm[]): DiffField | null {
+  if (!rest.length) return null;
+  const n = target.data.length, ts = target.sigma ?? 1;
+  const sig = rest.map((m) => m.sigma ?? 1);
+  const d = new Float32Array(n), buf = new Float32Array(rest.length);
+  for (let i = 0; i < n; i++) {
+    const t = target.data[i];
+    if (!Number.isFinite(t)) { d[i] = NaN; continue; }
+    let c = 0;
+    for (let k = 0; k < rest.length; k++) {
+      const v = rest[k].data[i] * sig[k];
+      if (!Number.isFinite(v)) continue;
+      let j = c++; // insertion sort: the list is short
+      while (j > 0 && buf[j - 1] > v) { buf[j] = buf[j - 1]; j--; }
+      buf[j] = v;
+    }
+    d[i] = c ? (t * ts - (c & 1 ? buf[c >> 1] : (buf[c / 2 - 1] + buf[c / 2]) / 2)) / ts : NaN;
+  }
+  return { w: target.w, h: target.h, data: d, ...settle(d, target.w, target.h) };
 }
 
 function boxBlur(src: Float32Array, w: number, h: number, r: number): Float32Array {
